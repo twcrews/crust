@@ -3,11 +3,13 @@
   "displayName": "Crust",
   "description": "Pi Coding Agent Extension",
   "version": "0.0.1",
+  "icon": "branding/icon.png",
   "engines": {
     "vscode": "^1.118.0"
   },
   "categories": [
-    "Other"
+    "AI",
+    "Chat"
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
