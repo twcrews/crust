@@ -1,7 +1,5 @@
 # Crust: Pi Coding Agent Extension for VS Code
 
-![logo](branding/wordmark.svg)
-
 Crust is an extension for Visual Studio Code that acts as a true UI for the [Pi Coding Agent](https://pi.dev/).
 
 The goal of Crust is feature parity with existing similar extensions (like the [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)).
