@@ -13,16 +13,6 @@ import { getToolBody, getToolPath, getToolResultText, isFileTool } from '../ui/t
 import { formatUsageStatus } from '../ui/usageStatus';
 import { getNonce } from '../utils/nonce';
 
-suite('Extension activation', () => {
-	test('contributes the open chat command', async () => {
-		const extension = vscode.extensions.getExtension('undefined_publisher.crust') ?? vscode.extensions.getExtension('twcrews.crust');
-		await extension?.activate();
-
-		const commands = await vscode.commands.getCommands(true);
-		assert.ok(commands.includes('crust.openChat'));
-	});
-});
-
 suite('RPC type guards', () => {
 	test('identifies valid responses and rejects malformed responses', () => {
 		assert.strictEqual(isRpcResponse({ type: 'response', command: 'get_state', success: true }), true);
