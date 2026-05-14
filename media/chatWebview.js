@@ -6,6 +6,10 @@ const prompt = document.getElementById("prompt");
 const model = document.getElementById("model");
 const status = document.getElementById("status");
 const history = document.getElementById("history");
+const jumpTop = document.getElementById("jump-top");
+const jumpPreviousUser = document.getElementById("jump-previous-user");
+const jumpNextUser = document.getElementById("jump-next-user");
+const jumpBottom = document.getElementById("jump-bottom");
 
 form.addEventListener("submit", (event) => {
 	event.preventDefault();
@@ -34,6 +38,26 @@ model.addEventListener("change", () => {
 history.addEventListener("click", () => {
 	vscode.postMessage({ type: "showHistory" });
 });
+
+jumpTop.addEventListener("click", () => {
+	messages.scrollTop = 0;
+	updateConversationNavButtons();
+});
+
+jumpPreviousUser.addEventListener("click", () => {
+	jumpToUserPrompt("previous");
+});
+
+jumpNextUser.addEventListener("click", () => {
+	jumpToUserPrompt("next");
+});
+
+jumpBottom.addEventListener("click", () => {
+	scrollToBottom();
+});
+
+messages.addEventListener("scroll", updateConversationNavButtons);
+updateConversationNavButtons();
 
 window.addEventListener("message", (event) => {
 	const message = event.data;
@@ -122,10 +146,21 @@ function addThinking(id) {
 	const button = document.createElement("button");
 	button.type = "button";
 	button.className = "thinking-toggle";
-	button.textContent = "Show thinking";
+	button.setAttribute("aria-expanded", "false");
+
+	const chevron = document.createElement("span");
+	chevron.className = "thinking-chevron";
+	chevron.setAttribute("aria-hidden", "true");
+	button.append(chevron);
+
+	const label = document.createElement("span");
+	label.textContent = "Show thinking";
+	button.append(label);
+
 	button.addEventListener("click", () => {
 		const expanded = element.classList.toggle("expanded");
-		button.textContent = expanded ? "Hide thinking" : "Show thinking";
+		button.setAttribute("aria-expanded", String(expanded));
+		label.textContent = expanded ? "Hide thinking" : "Show thinking";
 	});
 	element.append(button);
 
@@ -162,14 +197,16 @@ function upsertTool(message) {
 		messages.append(element);
 	}
 
+	const hasBody = Boolean(message.body);
 	element.className = "tool-card " + (message.status ?? "");
+	element.classList.toggle("no-body", !hasBody);
 	const header = element.querySelector(".tool-header");
 	const body = element.querySelector(".tool-body");
 	const path = message.path ? " " + message.path : "";
 	header.textContent = (message.toolName ?? "tool") + path + formatToolStatus(message.status);
 	header.title = header.textContent;
 	body.textContent = message.body ?? "";
-	body.hidden = !message.body;
+	body.hidden = !hasBody;
 	body.classList.toggle("diff", Boolean(message.isDiff));
 	scrollToBottom();
 }
@@ -201,6 +238,49 @@ function autoResizePrompt() {
 	prompt.style.overflowY = prompt.scrollHeight > 180 ? "auto" : "hidden";
 }
 
+function jumpToUserPrompt(direction) {
+	const prompts = Array.from(messages.querySelectorAll(".message.user"));
+	const threshold = 8;
+	const currentTop = messages.scrollTop;
+	let target;
+
+	for (const promptElement of prompts) {
+		const promptTop = getMessageScrollTop(promptElement);
+		if (direction === "previous" && promptTop < currentTop - threshold) {
+			target = promptElement;
+		}
+		if (direction === "next" && promptTop > currentTop + threshold) {
+			target = promptElement;
+			break;
+		}
+	}
+
+	if (target) {
+		messages.scrollTop = getMessageScrollTop(target);
+		updateConversationNavButtons();
+		return;
+	}
+	if (direction === "next") {
+		scrollToBottom();
+	}
+}
+
+function getMessageScrollTop(element) {
+	return Math.max(0, element.offsetTop - messages.offsetTop - 16);
+}
+
+function updateConversationNavButtons() {
+	const threshold = 2;
+	const atTop = messages.scrollTop <= threshold;
+	const atBottom = messages.scrollTop + messages.clientHeight >= messages.scrollHeight - threshold;
+
+	jumpTop.disabled = atTop;
+	jumpPreviousUser.disabled = atTop;
+	jumpNextUser.disabled = atBottom;
+	jumpBottom.disabled = atBottom;
+}
+
 function scrollToBottom() {
 	messages.scrollTop = messages.scrollHeight;
+	updateConversationNavButtons();
 }

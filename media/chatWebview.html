@@ -21,6 +21,38 @@
 			</button>
 		</header>
 		<main id="messages" class="messages" aria-live="polite"></main>
+		<nav class="conversation-nav" aria-label="Conversation navigation">
+			<span class="conversation-nav-item" data-tooltip="Jump to top">
+				<button id="jump-top" class="conversation-nav-button" type="button" aria-label="Jump to top">
+					<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<path d="M4 7L8 3L12 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+						<path d="M4 12L8 8L12 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+					</svg>
+				</button>
+			</span>
+			<span class="conversation-nav-item" data-tooltip="Jump to previous prompt">
+				<button id="jump-previous-user" class="conversation-nav-button" type="button" aria-label="Jump to previous prompt">
+					<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<path d="M4 10L8 6L12 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+					</svg>
+				</button>
+			</span>
+			<span class="conversation-nav-item" data-tooltip="Jump to next prompt">
+				<button id="jump-next-user" class="conversation-nav-button" type="button" aria-label="Jump to next prompt">
+					<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+					</svg>
+				</button>
+			</span>
+			<span class="conversation-nav-item" data-tooltip="Jump to end">
+				<button id="jump-bottom" class="conversation-nav-button" type="button" aria-label="Jump to end">
+					<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<path d="M4 4L8 8L12 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+						<path d="M4 9L8 13L12 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+					</svg>
+				</button>
+			</span>
+		</nav>
 		<form id="form" class="controls">
 			<div class="input-row">
 				<textarea id="prompt" rows="1" placeholder="Ask Pi…"></textarea>
