@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
+	<link rel="stylesheet" href="{{styleUri}}">
+	<title>Crust Chat</title>
+</head>
+<body>
+	<div class="app">
+		<header class="title-bar">
+			<div id="session-title" class="session-title">New Chat</div>
+			<button id="history" class="history-button" type="button" aria-label="Show chat history" title="History">
+				<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+					<path d="M3.25 4.75A5.5 5.5 0 1 1 2.5 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+					<path d="M3.25 2.25v2.5h2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+					<path d="M8 5.25V8l2 1.25" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+				</svg>
+				<span>History</span>
+			</button>
+		</header>
+		<main id="messages" class="messages" aria-live="polite"></main>
+		<form id="form" class="controls">
+			<div class="input-row">
+				<textarea id="prompt" rows="1" placeholder="Ask Pi…"></textarea>
+				<button type="submit" aria-label="Submit prompt" title="Submit prompt">
+					<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<path d="M8 13V3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+						<path d="M3.75 7.25L8 3L12.25 7.25" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+					</svg>
+				</button>
+			</div>
+			<div class="metadata-row">
+				<select id="model" aria-label="Model"><option value="">Loading models…</option></select>
+				<div id="status" class="status"></div>
+			</div>
+		</form>
+	</div>
+
+	<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>

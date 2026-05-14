@@ -11,14 +11,29 @@
     "AI",
     "Chat"
   ],
+  "activationEvents": [
+    "onCommand:crust.openChat"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "crust.openChat",
-        "title": "Crust: Open Chat"
+        "title": "Crust: Open Chat",
+        "icon": {
+          "light": "branding/icon-small.svg",
+          "dark": "branding/icon-small.svg"
+        }
       }
-    ]
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "crust.openChat",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
