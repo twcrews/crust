@@ -5,6 +5,7 @@
   "version": "0.0.1",
   "publisher": "crews",
   "icon": "branding/icon.png",
+  "repository": "https://github.com/twcrews/crust",
   "engines": {
     "vscode": "^1.118.0"
   },
