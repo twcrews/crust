@@ -50,3 +50,5 @@
 	cursor: default;
 }
 .conversation-nav-button:disabled:hover {
+	background: var(--vscode-editor-background);
+}

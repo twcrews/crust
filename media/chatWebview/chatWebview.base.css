@@ -16,7 +16,9 @@ body {
 	height: 100vh;
 	display: flex;
 	flex-direction: column;
+}
 
+.messages-content,
 .controls {
 	box-sizing: border-box;
 	width: 100%;
@@ -27,3 +29,4 @@ body {
 
 .messages-content {
 	max-width: 640px;
+}
