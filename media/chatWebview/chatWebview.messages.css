@@ -81,7 +81,7 @@
 	white-space: nowrap;
 }
 .user-message-body {
-	white-space: pre-wrap;
+	white-space: normal;
 }
 .user.collapsible:not(.expanded) .user-message-body {
 	display: -webkit-box;

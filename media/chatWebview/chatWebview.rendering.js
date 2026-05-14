@@ -58,7 +58,7 @@ function renderUserMessage(element, text, ideContextLabel) {
 
 	const body = document.createElement("div");
 	body.className = "user-message-body";
-	body.textContent = text;
+	setMarkdownContent(body, text);
 	element.append(body);
 
 	const toggle = document.createElement("button");
@@ -144,6 +144,12 @@ function appendMessage(id, text) {
 	element.classList.remove("loading");
 	if (element.classList.contains("assistant")) {
 		setMarkdownContent(element, (element.dataset.markdown ?? "") + text);
+	} else if (element.classList.contains("user")) {
+		const body = element.querySelector(".user-message-body");
+		if (body) {
+			setMarkdownContent(body, (body.dataset.markdown ?? "") + text);
+			initUserMessageToggle(element);
+		}
 	} else {
 		element.textContent += text;
 	}

@@ -1,20 +1,27 @@
 .message.assistant,
+.user-message-body,
 .thinking-body {
 	white-space: normal;
 }
 .message.assistant p,
+.user-message-body p,
 .thinking-body p {
 	margin: 0 0 0.75em;
 }
 .message.assistant p:last-child,
+.user-message-body p:last-child,
 .thinking-body p:last-child,
 .message.assistant ul:last-child,
+.user-message-body ul:last-child,
 .thinking-body ul:last-child,
 .message.assistant pre:last-child,
+.user-message-body pre:last-child,
 .thinking-body pre:last-child,
 .message.assistant hr:last-child,
+.user-message-body hr:last-child,
 .thinking-body hr:last-child,
 .message.assistant .markdown-table-wrapper:last-child,
+.user-message-body .markdown-table-wrapper:last-child,
 .thinking-body .markdown-table-wrapper:last-child {
 	margin-bottom: 0;
 }
@@ -24,6 +31,12 @@
 .message.assistant h4,
 .message.assistant h5,
 .message.assistant h6,
+.user-message-body h1,
+.user-message-body h2,
+.user-message-body h3,
+.user-message-body h4,
+.user-message-body h5,
+.user-message-body h6,
 .thinking-body h1,
 .thinking-body h2,
 .thinking-body h3,
@@ -35,17 +48,20 @@
 	font-weight: 600;
 }
 .message.assistant ul,
+.user-message-body ul,
 .thinking-body ul {
 	margin: 0 0 0.75em;
 	padding-left: 1.4em;
 }
 .message.assistant blockquote,
+.user-message-body blockquote,
 .thinking-body blockquote {
 	margin: 0 0 0.75em;
 	padding-left: 10px;
 	color: var(--vscode-descriptionForeground);
 }
 .message.assistant code,
+.user-message-body code,
 .thinking-body code {
 	padding: 0.1em 0.3em;
 	border-radius: 3px;
@@ -54,6 +70,7 @@
 	background: var(--vscode-textCodeBlock-background, var(--vscode-editor-inactiveSelectionBackground));
 }
 .message.assistant pre,
+.user-message-body pre,
 .thinking-body pre {
 	margin: 0 0 0.75em;
 	padding: 10px;
@@ -62,11 +79,13 @@
 	background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));
 }
 .message.assistant pre code,
+.user-message-body pre code,
 .thinking-body pre code {
 	padding: 0;
 	background: transparent;
 }
 .message.assistant hr,
+.user-message-body hr,
 .thinking-body hr {
 	height: 0;
 	margin: 1em 0;
@@ -79,6 +98,7 @@
 	overflow-x: auto;
 }
 .message.assistant table,
+.user-message-body table,
 .thinking-body table {
 	width: max-content;
 	min-width: 100%;
@@ -86,6 +106,8 @@
 }
 .message.assistant th,
 .message.assistant td,
+.user-message-body th,
+.user-message-body td,
 .thinking-body th,
 .thinking-body td {
 	padding: 6px 8px;
@@ -93,6 +115,7 @@
 	vertical-align: top;
 }
 .message.assistant th,
+.user-message-body th,
 .thinking-body th {
 	font-weight: 600;
 	background: var(--vscode-editor-inactiveSelectionBackground);

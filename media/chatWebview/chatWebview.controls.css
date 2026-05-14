@@ -92,6 +92,10 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+.slash-autocomplete-option.active .slash-autocomplete-description,
+.slash-autocomplete-option:hover .slash-autocomplete-description {
+	color: var(--vscode-quickInput-foreground, var(--vscode-foreground));
+}
 .ide-context-button {
 	align-self: flex-start;
 	width: auto;
