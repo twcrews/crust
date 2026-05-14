@@ -2,29 +2,36 @@
 
 Crust is an extension for Visual Studio Code that acts as a true UI for the [Pi Coding Agent](https://pi.dev/).
 
-The goal of Crust is feature parity with existing similar extensions (like the [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)).
+The goal of Crust is to offer feature parity with existing similar extensions (like the [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)).
 
 ## Features
 
-| Feature | Progress |
-| ------- | -------- |
-| Session browser | Complete |
-| IDE file/selection context | Complete |
-| Command autocomplete with `/` | Complete |
-| File autocomplete with `@` | Complete |
-| Rich markdown rendering | Complete |
-| Rich diff snippets | Complete |
-| Session forking | Planned |
-| Session tree browsing | Planned |
-| Login/logout | Planned |
-| Change reversion | Planned |
-| Settings UI | Planned |
-| Chat import/export | Planned |
-| Session sharing | Planned |
+- **Session browser** — view and resume your past Pi agent sessions
+- **IDE file/selection context** — automatically attach the current file or highlighted code as context to your prompt
+- **Command autocomplete with `/`** — discover and insert slash commands
+- **File autocomplete with `@`** — reference workspace files in your prompt without leaving the chat
+- **Rich markdown rendering** — responses render with full markdown: headings, tables, code blocks, and more
+- **Rich diff snippets** — code changes are shown as inline diffs so you can review edits at a glance
+
+### Planned Features
+
+- **Session forking** — branch off from any point in a session to explore alternative directions
+- **Session tree browsing** — visualize and navigate the full tree of forked sessions
+- **Login/logout** — manage model provider credentials directly from the extension
+- **Change reversion** — roll back file changes made during a session with a single click
+- **Settings UI** — configure Pi through a dedicated settings panel
+- **Chat import/export** — save sessions to disk or load them back into the extension
+- **Session sharing** — generate a shareable link to a session for collaboration or review
 
 ## Requirements
 
-Crust requires that Pi be installed and in your `PATH`.
+Crust requires that Pi be installed and available in your `PATH`.
+
+Follow Pi's documentation to get started: https://pi.dev/docs/latest/quickstart
+
+## Contributing
+
+Feel free to submit issues or open pull requests with features and bug fixes on GitHub!
 
 ---
 
