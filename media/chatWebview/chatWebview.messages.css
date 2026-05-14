@@ -3,8 +3,7 @@
 	flex: 1;
 	overflow-y: auto;
 	scroll-behavior: smooth;
-	padding: 16px;
-	padding-bottom: 8px;
+	padding: 16px var(--chat-horizontal-padding) var(--controls-overlay-space);
 }
 
 .empty-state {
@@ -89,6 +88,7 @@
 	max-height: calc(1.45em * 2);
 	overflow: hidden;
 	-webkit-box-orient: vertical;
+	line-clamp: 2;
 	-webkit-line-clamp: 2;
 }
 .user-message-toggle {

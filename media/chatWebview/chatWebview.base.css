@@ -1,6 +1,8 @@
 :root {
 	color-scheme: light dark;
 	scroll-behavior: smooth;
+	--chat-horizontal-padding: clamp(24px, 5vw, 56px);
+	--controls-overlay-space: 120px;
 }
 body {
 	margin: 0;
@@ -13,6 +15,7 @@ body {
 	display: none !important;
 }
 .app {
+	position: relative;
 	height: 100vh;
 	display: flex;
 	flex-direction: column;
@@ -22,11 +25,4 @@ body {
 .controls {
 	box-sizing: border-box;
 	width: 100%;
-	max-width: 720px;
-	margin-left: auto;
-	margin-right: auto;
-}
-
-.messages-content {
-	max-width: 640px;
 }
