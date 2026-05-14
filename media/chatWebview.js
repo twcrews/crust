@@ -205,10 +205,35 @@ function upsertTool(message) {
 	const path = message.path ? " " + message.path : "";
 	header.textContent = (message.toolName ?? "tool") + path + formatToolStatus(message.status);
 	header.title = header.textContent;
-	body.textContent = message.body ?? "";
+	renderToolBody(body, message.body ?? "", Boolean(message.isDiff));
 	body.hidden = !hasBody;
 	body.classList.toggle("diff", Boolean(message.isDiff));
 	scrollToBottom();
+}
+
+function renderToolBody(body, text, isDiff) {
+	body.textContent = "";
+	if (!isDiff) {
+		body.textContent = text;
+		return;
+	}
+
+	const lines = text.split("\n");
+	for (const [index, line] of lines.entries()) {
+		const lineElement = document.createElement("span");
+		lineElement.className = "diff-line";
+		if (line.startsWith("+") && !line.startsWith("+++")) {
+			lineElement.classList.add("added");
+		}
+		if (line.startsWith("-") && !line.startsWith("---")) {
+			lineElement.classList.add("deleted");
+		}
+		lineElement.textContent = line;
+		body.append(lineElement);
+		if (index < lines.length - 1) {
+			body.append(document.createTextNode("\n"));
+		}
+	}
 }
 
 function formatToolStatus(status) {
