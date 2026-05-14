@@ -48,6 +48,9 @@ jspm_packages/
 dist/
 out/
 
+# VS Code integration test downloads
+.vscode-test/
+
 # TypeScript v1 declaration files
 typings/
 

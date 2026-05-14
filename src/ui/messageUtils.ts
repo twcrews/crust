@@ -17,7 +17,7 @@ export function getBlockText(block: unknown, key: 'text' | 'thinking'): string {
 export function parseJsonObject(line: string): Record<string, unknown> | undefined {
 	try {
 		const parsed = JSON.parse(line) as unknown;
-		return typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : undefined;
+		return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
 	} catch {
 		return undefined;
 	}

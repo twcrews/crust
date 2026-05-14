@@ -1,15 +1,266 @@
 import * as assert from 'assert';
-
-// You can import and use all API from the 'vscode' module
-// as well as import your extension to test it
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import * as vscode from 'vscode';
-// import * as myExtension from '../../extension';
+import { isRpcEvent, isRpcResponse } from '../pi/rpcTypes';
+import { buildPromptWithIdeContext, extractRestoredPrompt, formatSelectionRange, getIdeContext } from '../ui/ideContext';
+import { getMessageContent, getBlockText, getBlockType, getEntryTimestamp, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from '../ui/messageUtils';
+import { getPathSuggestions } from '../ui/pathAutocomplete';
+import { listSessions } from '../ui/sessionHistory';
+import { getChatWebviewHtml } from '../ui/chatWebview';
+import { getToolBody, getToolPath, getToolResultText, isFileTool } from '../ui/toolUtils';
+import { formatUsageStatus } from '../ui/usageStatus';
+import { getNonce } from '../utils/nonce';
 
-suite('Extension Test Suite', () => {
-	vscode.window.showInformationMessage('Start all tests.');
+suite('Extension activation', () => {
+	test('contributes the open chat command', async () => {
+		const extension = vscode.extensions.getExtension('undefined_publisher.crust') ?? vscode.extensions.getExtension('twcrews.crust');
+		await extension?.activate();
 
-	test('Sample test', () => {
-		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
-		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
+		const commands = await vscode.commands.getCommands(true);
+		assert.ok(commands.includes('crust.openChat'));
+	});
+});
+
+suite('RPC type guards', () => {
+	test('identifies valid responses and rejects malformed responses', () => {
+		assert.strictEqual(isRpcResponse({ type: 'response', command: 'get_state', success: true }), true);
+		assert.strictEqual(isRpcResponse({ type: 'response', command: 'get_state' }), false);
+		assert.strictEqual(isRpcResponse({ type: 'event', command: 'get_state', success: true }), false);
+		assert.strictEqual(isRpcResponse(null), false);
+	});
+
+	test('identifies RPC events by string type', () => {
+		assert.strictEqual(isRpcEvent({ type: 'assistant_message', assistantMessageEvent: { type: 'delta' } }), true);
+		assert.strictEqual(isRpcEvent({ type: 42 }), false);
+		assert.strictEqual(isRpcEvent(undefined), false);
+	});
+});
+
+suite('Message utilities', () => {
+	test('safely reads message and block fields', () => {
+		const message = { role: 'assistant', content: [{ type: 'text', text: 'hello' }, { type: 'thinking', thinking: 'hmm' }], timestamp: 123 };
+		assert.deepStrictEqual(getMessageContent(message), message.content);
+		assert.strictEqual(getMessageRole(message), 'assistant');
+		assert.strictEqual(getMessageTimestamp(message), 123);
+		assert.strictEqual(getBlockType(message.content[0]), 'text');
+		assert.strictEqual(getBlockText(message.content[0], 'text'), 'hello');
+		assert.strictEqual(getBlockText(message.content[1], 'thinking'), 'hmm');
+	});
+
+	test('extracts text from string and text block content only', () => {
+		assert.strictEqual(getMessageText({ content: 'plain text' }), 'plain text');
+		assert.strictEqual(getMessageText({ content: [{ type: 'text', text: 'one' }, { type: 'tool_use', text: 'skip' }, { type: 'text', text: 'two' }] }), 'one\ntwo');
+		assert.strictEqual(getMessageText({ content: [{ type: 'text' }] }), '');
+		assert.strictEqual(getMessageText('not a message'), '');
+	});
+
+	test('parses JSON object lines and timestamps defensively', () => {
+		assert.deepStrictEqual(parseJsonObject('{"type":"message"}'), { type: 'message' });
+		assert.strictEqual(parseJsonObject('[]'), undefined);
+		assert.strictEqual(parseJsonObject('not-json'), undefined);
+		assert.strictEqual(getEntryTimestamp({ timestamp: '2024-01-02T03:04:05.000Z' }), Date.UTC(2024, 0, 2, 3, 4, 5));
+		assert.strictEqual(getEntryTimestamp({ timestamp: 'invalid' }), undefined);
+	});
+});
+
+suite('IDE context utilities', () => {
+	test('formats selections using VS Code one-based line numbers', () => {
+		assert.strictEqual(formatSelectionRange(new vscode.Selection(0, 0, 0, 5)), '1');
+		assert.strictEqual(formatSelectionRange(new vscode.Selection(0, 0, 2, 3)), '1-3');
+		assert.strictEqual(formatSelectionRange(new vscode.Selection(0, 0, 2, 0)), '1-2');
+	});
+
+	test('builds and strips prompt wrappers with selected text metadata', () => {
+		const prompt = buildPromptWithIdeContext('Fix this', {
+			label: 'example.ts:2-3',
+			filePath: 'src/example.ts',
+			languageId: 'typescript',
+			selectionRange: '2-3',
+			selectedText: 'const x = 1;',
+		});
+
+		assert.ok(prompt.startsWith('<ide_context>\nCurrent file: src/example.ts\nSelected lines: 2-3'));
+		assert.ok(prompt.includes('```typescript\nconst x = 1;\n```'));
+		assert.strictEqual(prompt.endsWith('\n\nFix this'), true);
+		assert.deepStrictEqual(extractRestoredPrompt(prompt), { text: 'Fix this', ideContextLabel: 'example.ts:2-3' });
+		assert.deepStrictEqual(extractRestoredPrompt('No wrapper'), { text: 'No wrapper' });
+	});
+
+	test('gets file and selection context from an editor', async () => {
+		const document = await vscode.workspace.openTextDocument({ content: 'alpha\nbeta\ngamma\n', language: 'plaintext' });
+		const editor = await vscode.window.showTextDocument(document);
+		editor.selection = new vscode.Selection(1, 0, 2, 0);
+
+		const context = getIdeContext(editor);
+		assert.strictEqual(context?.label, `${document.fileName}:2`);
+		assert.strictEqual(context?.filePath, document.fileName);
+		assert.strictEqual(context?.languageId, 'plaintext');
+		assert.strictEqual(context?.selectionRange, '2');
+		assert.strictEqual(context?.selectedText, 'beta\n');
+	});
+});
+
+suite('Tool utilities', () => {
+	test('recognizes file tools and extracts paths from args', () => {
+		assert.strictEqual(isFileTool('read'), true);
+		assert.strictEqual(isFileTool('write'), true);
+		assert.strictEqual(isFileTool('edit'), true);
+		assert.strictEqual(isFileTool('bash'), false);
+		assert.strictEqual(getToolPath({ path: 'src/a.ts' }), 'src/a.ts');
+		assert.strictEqual(getToolPath({ file_path: 'src/b.ts' }), 'src/b.ts');
+		assert.strictEqual(getToolPath({ path: 1 }), undefined);
+	});
+
+	test('builds previews for write and edit tools', () => {
+		assert.strictEqual(getToolBody('read', { path: 'src/a.ts' }), undefined);
+		assert.strictEqual(getToolBody('write', { content: 'new content' }), 'new content');
+		assert.strictEqual(getToolBody('edit', { edits: [{ oldText: 'old\ntext', newText: 'new' }] }), '@@ edit 1 @@\n-old\n-text\n+new');
+		assert.strictEqual(getToolBody('edit', { edits: 'invalid' }), undefined);
+	});
+
+	test('extracts text-only tool result content', () => {
+		assert.strictEqual(getToolResultText({ content: [{ type: 'text', text: ' first ' }, { type: 'image', text: 'skip' }, { type: 'text', text: 'second' }] }), 'first \nsecond');
+		assert.strictEqual(getToolResultText({ content: [{ type: 'image', text: 'skip' }] }), undefined);
+		assert.strictEqual(getToolResultText(undefined), undefined);
+	});
+});
+
+suite('Usage status formatting', () => {
+	test('sums nested usage fields and formats context/cost', () => {
+		const status = formatUsageStatus([
+			{ usage: { input: 1000, output: 250, cacheRead: 50, cacheWrite: 25, totalTokens: 1325, cost: { total: 0.01 } } },
+			{ message: { usage: { input: 200, output: 300, totalTokens: 500, cost: { total: 0.02 } } } },
+			{ usage: { input: Number.NaN, output: 'bad', cost: { total: Number.NaN } } },
+		], 2000);
+
+		assert.strictEqual(status, '1.8k · 1.2k in · 550 out · 25%/2k · $0.03');
+	});
+
+	test('falls back to component token totals when totalTokens is absent', () => {
+		assert.strictEqual(formatUsageStatus([{ usage: { input: 10, output: 5, cacheRead: 3, cacheWrite: 2 } }], undefined), '20 · 10 in · 5 out · $0.00');
+	});
+});
+
+suite('Path autocomplete', () => {
+	let directory: string;
+
+	setup(async () => {
+		directory = await mkdtemp(join(tmpdir(), 'crust-paths-'));
+		await mkdir(join(directory, 'src', 'nested'), { recursive: true });
+		await mkdir(join(directory, 'docs'), { recursive: true });
+		await writeFile(join(directory, 'src', 'chatPanel.ts'), '');
+		await writeFile(join(directory, 'src', 'nested', 'usageStatus.ts'), '');
+		await writeFile(join(directory, 'docs', 'README.md'), '');
+	});
+
+	teardown(async () => {
+		await rm(directory, { recursive: true, force: true });
+	});
+
+	test('returns ranked filesystem suggestions without a cwd or git repository', async () => {
+		assert.deepStrictEqual(await getPathSuggestions(undefined, 'src'), []);
+
+		const suggestions = await getPathSuggestions(directory, 'src');
+		assert.ok(suggestions.some((suggestion) => suggestion.path === 'src/' && suggestion.isDirectory));
+		assert.ok(suggestions.some((suggestion) => suggestion.path === 'src/chatPanel.ts' && !suggestion.isDirectory));
+	});
+
+	test('normalizes slash-prefixed and backslash queries and supports fuzzy matches', async () => {
+		const normalized = await getPathSuggestions(directory, '/src\\chat');
+		assert.strictEqual(normalized[0]?.path, 'src/chatPanel.ts');
+
+		const fuzzy = await getPathSuggestions(directory, 'usts');
+		assert.ok(fuzzy.some((suggestion) => suggestion.path === 'src/nested/usageStatus.ts'));
+	});
+});
+
+suite('Session history', () => {
+	let cwd: string;
+	let sessionRoot: string;
+	let previousSessionDir: string | undefined;
+
+	setup(async () => {
+		cwd = await mkdtemp(join(tmpdir(), 'crust-workspace-'));
+		sessionRoot = await mkdtemp(join(tmpdir(), 'crust-sessions-'));
+		previousSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
+		process.env.PI_CODING_AGENT_SESSION_DIR = sessionRoot;
+	});
+
+	teardown(async () => {
+		if (previousSessionDir === undefined) {
+			delete process.env.PI_CODING_AGENT_SESSION_DIR;
+		} else {
+			process.env.PI_CODING_AGENT_SESSION_DIR = previousSessionDir;
+		}
+		await rm(cwd, { recursive: true, force: true });
+		await rm(sessionRoot, { recursive: true, force: true });
+	});
+
+	test('lists Pi JSONL sessions sorted by message timestamp', async () => {
+		const directory = join(sessionRoot, `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`);
+		await mkdir(directory, { recursive: true });
+		await writeFile(join(directory, 'not-a-session.jsonl'), '{"type":"message"}\n');
+		await writeFile(join(directory, 'ignored.txt'), '');
+		await writeFile(join(directory, 'older.jsonl'), [
+			JSON.stringify({ type: 'session' }),
+			JSON.stringify({ type: 'message', timestamp: '2024-01-01T00:00:00.000Z', message: { role: 'user', content: 'Older question' } }),
+		].join('\n'));
+		await writeFile(join(directory, 'newer.jsonl'), [
+			JSON.stringify({ type: 'session' }),
+			JSON.stringify({ type: 'session_info', name: 'Named session' }),
+			JSON.stringify({ type: 'message', message: { role: 'user', content: buildPromptWithIdeContext('Newer question', { label: 'a.ts', filePath: 'src/a.ts', languageId: 'typescript' }), timestamp: Date.UTC(2024, 0, 3) } }),
+			JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'Answer' }], timestamp: Date.UTC(2024, 0, 4) } }),
+		].join('\n'));
+
+		const sessions = await listSessions({ getState: async () => ({}) } as never, cwd);
+		assert.strictEqual(sessions.length, 2);
+		assert.strictEqual(sessions[0].name, 'Named session');
+		assert.strictEqual(sessions[0].firstMessage, 'Newer question');
+		assert.strictEqual(sessions[0].messageCount, 2);
+		assert.ok(sessions[0].path.endsWith('newer.jsonl'));
+		assert.strictEqual(sessions[1].firstMessage, 'Older question');
+	});
+
+	test('uses sessionFile from Pi state when available', async () => {
+		const directory = await mkdtemp(join(tmpdir(), 'crust-state-sessions-'));
+		try {
+			await writeFile(join(directory, 'state.jsonl'), [
+				JSON.stringify({ type: 'session' }),
+				JSON.stringify({ type: 'message', message: { role: 'user', content: 'From state' } }),
+			].join('\n'));
+
+			const sessions = await listSessions({ getState: async () => ({ sessionFile: join(directory, 'current.jsonl') }) } as never, undefined);
+			assert.strictEqual(sessions.length, 1);
+			assert.strictEqual(sessions[0].firstMessage, 'From state');
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
+});
+
+suite('Webview HTML and nonce generation', () => {
+	test('injects nonce, CSP source, styles, scripts, and icon into the chat webview template', () => {
+		const extensionUri = vscode.Uri.file(resolve(__dirname, '..', '..'));
+		const webview = {
+			cspSource: 'vscode-resource:',
+			asWebviewUri: (uri: vscode.Uri) => vscode.Uri.parse(`vscode-webview://${uri.fsPath}`),
+		} as Pick<vscode.Webview, 'cspSource' | 'asWebviewUri'> as vscode.Webview;
+
+		const html = getChatWebviewHtml(extensionUri, webview);
+		assert.ok(html.includes('vscode-resource:'));
+		assert.ok(html.includes('chatWebview.base.css'));
+		assert.ok(html.includes('chatWebview.main.js'));
+		assert.ok(html.includes('branding/icon.svg'));
+		assert.ok(!html.includes('{{nonce}}'));
+		assert.ok(!html.includes('{{styleTags}}'));
+		assert.ok(!html.includes('{{scriptTags}}'));
+	});
+
+	test('generates 32-character alphanumeric nonces', () => {
+		const nonce = getNonce();
+		assert.match(nonce, /^[A-Za-z0-9]{32}$/);
+		assert.notStrictEqual(getNonce(), nonce);
 	});
 });
