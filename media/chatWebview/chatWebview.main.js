@@ -12,6 +12,7 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 logWebview("Chat webview loaded");
+setRandomEmptyStateFlavorText();
 
 form.addEventListener("submit", (event) => {
 	event.preventDefault();

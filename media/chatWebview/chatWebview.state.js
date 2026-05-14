@@ -83,4 +83,3 @@ const emptyStateFlavorTexts = [
 	"Pi is ready to build your abstract-prototype-singleton-proxy-adapter-factory pattern."
 ];
 
-setRandomEmptyStateFlavorText();

@@ -143,6 +143,7 @@ button svg {
 }
 button:hover {
 	background: var(--vscode-button-hoverBackground);
+}
 
 .metadata-row {
 	display: flex;
