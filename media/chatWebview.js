@@ -5,13 +5,19 @@ const messagesContent = document.getElementById("messages-content");
 const emptyState = document.getElementById("empty-state");
 const form = document.getElementById("form");
 const prompt = document.getElementById("prompt");
+const ideContext = document.getElementById("ide-context");
+const ideContextLabel = document.getElementById("ide-context-label");
 const model = document.getElementById("model");
 const status = document.getElementById("status");
 const history = document.getElementById("history");
+const newChat = document.getElementById("new-chat");
 const jumpTop = document.getElementById("jump-top");
 const jumpPreviousUser = document.getElementById("jump-previous-user");
 const jumpNextUser = document.getElementById("jump-next-user");
 const jumpBottom = document.getElementById("jump-bottom");
+let ideContextEnabled = true;
+let currentIdeContextLabel = "";
+let currentTurn = null;
 
 window.addEventListener("error", (event) => {
 	postWebviewLog("Webview error", {
@@ -36,11 +42,16 @@ form.addEventListener("submit", (event) => {
 	}
 	prompt.value = "";
 	autoResizePrompt();
-	logWebview("Submitting prompt", { length: text.trim().length });
-	vscode.postMessage({ type: "submit", text });
+	logWebview("Submitting prompt", { length: text.trim().length, includeIdeContext: ideContextEnabled && !ideContext.classList.contains("hidden") });
+	vscode.postMessage({ type: "submit", text, includeIdeContext: ideContextEnabled && !ideContext.classList.contains("hidden") });
 });
 
 prompt.addEventListener("input", autoResizePrompt);
+
+ideContext.addEventListener("click", () => {
+	ideContextEnabled = !ideContextEnabled;
+	updateIdeContextButtonState();
+});
 
 prompt.addEventListener("keydown", (event) => {
 	if (event.key === "Enter" && !event.shiftKey) {
@@ -55,6 +66,10 @@ model.addEventListener("change", () => {
 
 history.addEventListener("click", () => {
 	vscode.postMessage({ type: "showHistory" });
+});
+
+newChat.addEventListener("click", () => {
+	vscode.postMessage({ type: "newChat" });
 });
 
 jumpTop.addEventListener("click", () => {
@@ -92,12 +107,16 @@ window.addEventListener("message", (event) => {
 	if (message.type === "error") {
 		setStatus(message.message ?? "", true);
 	}
+	if (message.type === "ideContext") {
+		setIdeContext(message.label ?? "");
+	}
 	if (message.type === "clearMessages") {
 		messagesContent.textContent = "";
+		currentTurn = null;
 		updateEmptyState();
 	}
 	if (message.type === "addMessage") {
-		addMessage(message.id, message.role, message.text ?? "", message.loading ?? false);
+		addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "");
 	}
 	if (message.type === "appendMessage") {
 		appendMessage(message.id, message.text ?? "");
@@ -166,26 +185,116 @@ function setModels(models, selected) {
 	}
 }
 
-function addMessage(id, role, text, loading) {
-	if (role === "user" && messagesContent.querySelector(".message.user")) {
-		const divider = document.createElement("div");
-		divider.className = "user-prompt-divider";
-		divider.setAttribute("aria-hidden", "true");
-		messagesContent.append(divider);
-	}
-
+function addMessage(id, role, text, loading, ideContextLabel) {
 	const element = document.createElement("div");
 	element.id = id;
 	element.className = "message " + role + (loading ? " loading" : "");
 	if (role === "assistant" && !loading) {
 		setMarkdownContent(element, text);
+	} else if (role === "user") {
+		renderUserMessage(element, text, ideContextLabel);
 	} else {
 		element.textContent = text;
 	}
-	messagesContent.append(element);
+	appendConversationElement(element, role === "user");
+	if (role === "user") {
+		initUserMessageToggle(element);
+	}
 	updateEmptyState();
 	keepLoadingAtBottom();
-	scrollToBottom();
+	finishContentUpdate();
+}
+
+function renderUserMessage(element, text, ideContextLabel) {
+	if (ideContextLabel) {
+		const context = document.createElement("div");
+		context.className = "message-context";
+		context.title = ideContextLabel;
+		context.append(createEyeIcon());
+		const label = document.createElement("span");
+		label.textContent = ideContextLabel;
+		context.append(label);
+		element.append(context);
+	}
+
+	const body = document.createElement("div");
+	body.className = "user-message-body";
+	body.textContent = text;
+	element.append(body);
+
+	const toggle = document.createElement("button");
+	toggle.type = "button";
+	toggle.className = "user-message-toggle";
+	toggle.textContent = "Show more";
+	toggle.setAttribute("aria-expanded", "false");
+	toggle.hidden = true;
+	toggle.addEventListener("click", () => {
+		const expanded = element.classList.toggle("expanded");
+		toggle.textContent = expanded ? "Show less" : "Show more";
+		toggle.setAttribute("aria-expanded", String(expanded));
+		finishContentUpdate();
+	});
+	element.append(toggle);
+}
+
+function initUserMessageToggle(element) {
+	const body = element.querySelector(".user-message-body");
+	const toggle = element.querySelector(".user-message-toggle");
+	if (!body || !toggle) {
+		return;
+	}
+	element.classList.add("collapsible");
+	const overflows = body.scrollHeight > body.clientHeight + 1;
+	toggle.hidden = !overflows;
+	if (!overflows) {
+		element.classList.remove("collapsible");
+	}
+}
+
+function appendConversationElement(element, startsTurn) {
+	if (startsTurn) {
+		if (messagesContent.querySelector(".message.user")) {
+			const divider = document.createElement("div");
+			divider.className = "user-prompt-divider";
+			divider.setAttribute("aria-hidden", "true");
+			messagesContent.append(divider);
+		}
+		currentTurn = document.createElement("section");
+		currentTurn.className = "conversation-turn";
+		messagesContent.append(currentTurn);
+	}
+
+	if (currentTurn) {
+		currentTurn.append(element);
+		return;
+	}
+	messagesContent.append(element);
+}
+
+function createEyeIcon() {
+	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	svg.setAttribute("aria-hidden", "true");
+	svg.setAttribute("width", "14");
+	svg.setAttribute("height", "14");
+	svg.setAttribute("viewBox", "0 0 16 16");
+	svg.setAttribute("fill", "none");
+
+	const eye = document.createElementNS("http://www.w3.org/2000/svg", "path");
+	eye.setAttribute("d", "M1.75 8S4 4.25 8 4.25S14.25 8 14.25 8S12 11.75 8 11.75S1.75 8 1.75 8Z");
+	eye.setAttribute("stroke", "currentColor");
+	eye.setAttribute("stroke-width", "1.3");
+	eye.setAttribute("stroke-linecap", "round");
+	eye.setAttribute("stroke-linejoin", "round");
+	svg.append(eye);
+
+	const pupil = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+	pupil.setAttribute("cx", "8");
+	pupil.setAttribute("cy", "8");
+	pupil.setAttribute("r", "1.75");
+	pupil.setAttribute("stroke", "currentColor");
+	pupil.setAttribute("stroke-width", "1.3");
+	svg.append(pupil);
+	return svg;
 }
 
 function appendMessage(id, text) {
@@ -200,7 +309,7 @@ function appendMessage(id, text) {
 		element.textContent += text;
 	}
 	keepLoadingAtBottom();
-	scrollToBottom();
+	finishContentUpdate();
 }
 
 function removeMessage(id) {
@@ -242,10 +351,10 @@ function addThinking(id) {
 	const body = document.createElement("div");
 	body.className = "thinking-body";
 	element.append(body);
-	messagesContent.append(element);
+	appendConversationElement(element, false);
 	updateEmptyState();
 	keepLoadingAtBottom();
-	scrollToBottom();
+	finishContentUpdate();
 }
 
 function appendThinking(id, text) {
@@ -255,7 +364,7 @@ function appendThinking(id, text) {
 	}
 	setMarkdownContent(body, (body.dataset.markdown ?? "") + text);
 	keepLoadingAtBottom();
-	scrollToBottom();
+	finishContentUpdate();
 }
 
 function setMarkdownContent(element, markdown) {
@@ -317,6 +426,21 @@ function renderMarkdown(element, markdown) {
 			continue;
 		}
 
+		if (isMarkdownDivider(line)) {
+			flushParagraph();
+			element.append(document.createElement("hr"));
+			index++;
+			continue;
+		}
+
+		if (isTableStart(lines, index)) {
+			flushParagraph();
+			const tableResult = renderTable(lines, index);
+			element.append(tableResult.element);
+			index = tableResult.nextIndex;
+			continue;
+		}
+
 		const listItem = line.match(/^\s*[-*+]\s+(.+)$/);
 		if (listItem) {
 			flushParagraph();
@@ -357,6 +481,112 @@ function renderMarkdown(element, markdown) {
 		index++;
 	}
 	flushParagraph();
+}
+
+function isMarkdownDivider(line) {
+	return /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line);
+}
+
+function isTableStart(lines, index) {
+	return index + 1 < lines.length && hasTablePipe(lines[index]) && isTableSeparatorLine(lines[index + 1]);
+}
+
+function hasTablePipe(line) {
+	return /(^|[^\\])\|/.test(line);
+}
+
+function isTableSeparatorLine(line) {
+	const cells = splitTableRow(line).map((cell) => cell.trim());
+	return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function splitTableRow(line) {
+	let value = line.trim();
+	if (value.startsWith("|")) {
+		value = value.slice(1);
+	}
+	if (value.endsWith("|") && !value.endsWith("\\|")) {
+		value = value.slice(0, -1);
+	}
+
+	const cells = [];
+	let current = "";
+	let escaped = false;
+	for (const character of value) {
+		if (escaped) {
+			current += character;
+			escaped = false;
+			continue;
+		}
+		if (character === "\\") {
+			escaped = true;
+			continue;
+		}
+		if (character === "|") {
+			cells.push(current.trim());
+			current = "";
+			continue;
+		}
+		current += character;
+	}
+	if (escaped) {
+		current += "\\";
+	}
+	cells.push(current.trim());
+	return cells;
+}
+
+function renderTable(lines, startIndex) {
+	const headers = splitTableRow(lines[startIndex]);
+	const alignments = splitTableRow(lines[startIndex + 1]).map((cell) => {
+		const trimmed = cell.trim();
+		if (trimmed.startsWith(":") && trimmed.endsWith(":")) {
+			return "center";
+		}
+		if (trimmed.endsWith(":")) {
+			return "right";
+		}
+		if (trimmed.startsWith(":")) {
+			return "left";
+		}
+		return "";
+	});
+	let index = startIndex + 2;
+
+	const wrapper = document.createElement("div");
+	wrapper.className = "markdown-table-wrapper";
+	const table = document.createElement("table");
+	const thead = document.createElement("thead");
+	const headerRow = document.createElement("tr");
+	for (const [cellIndex, header] of headers.entries()) {
+		const th = document.createElement("th");
+		if (alignments[cellIndex]) {
+			th.style.textAlign = alignments[cellIndex];
+		}
+		renderInline(th, header);
+		headerRow.append(th);
+	}
+	thead.append(headerRow);
+	table.append(thead);
+
+	const tbody = document.createElement("tbody");
+	while (index < lines.length && lines[index].trim() && hasTablePipe(lines[index])) {
+		const row = document.createElement("tr");
+		const cells = splitTableRow(lines[index]);
+		for (let cellIndex = 0; cellIndex < headers.length; cellIndex++) {
+			const td = document.createElement("td");
+			if (alignments[cellIndex]) {
+				td.style.textAlign = alignments[cellIndex];
+			}
+			renderInline(td, cells[cellIndex] ?? "");
+			row.append(td);
+		}
+		tbody.append(row);
+		index++;
+	}
+	table.append(tbody);
+	wrapper.append(table);
+	return { element: wrapper, nextIndex: index };
 }
 
 function renderInline(element, text) {
@@ -407,7 +637,7 @@ function upsertTool(message) {
 		const body = document.createElement("pre");
 		body.className = "tool-body";
 		element.append(body);
-		messagesContent.append(element);
+		appendConversationElement(element, false);
 		updateEmptyState();
 	}
 
@@ -423,7 +653,7 @@ function upsertTool(message) {
 	body.hidden = !hasBody;
 	body.classList.toggle("diff", Boolean(message.isDiff));
 	keepLoadingAtBottom();
-	scrollToBottom();
+	finishContentUpdate();
 }
 
 function renderToolBody(body, text, isDiff) {
@@ -472,6 +702,22 @@ function setStatus(message, isError) {
 	status.className = "status" + (isError ? " error" : "");
 }
 
+function setIdeContext(label) {
+	ideContextLabel.textContent = label;
+	ideContext.title = label ? "Toggle IDE context: " + label : "Use IDE context";
+	ideContext.classList.toggle("hidden", !label);
+	if (!label || label !== currentIdeContextLabel) {
+		ideContextEnabled = true;
+	}
+	currentIdeContextLabel = label;
+	updateIdeContextButtonState();
+}
+
+function updateIdeContextButtonState() {
+	ideContext.classList.toggle("disabled", !ideContextEnabled);
+	ideContext.setAttribute("aria-pressed", String(ideContextEnabled));
+}
+
 function autoResizePrompt() {
 	prompt.style.height = "28px";
 	prompt.style.height = Math.max(28, Math.min(prompt.scrollHeight, 180)) + "px";
@@ -485,7 +731,7 @@ function jumpToUserPrompt(direction) {
 	let target;
 
 	for (const promptElement of prompts) {
-		const promptTop = getMessageScrollTop(promptElement);
+		const promptTop = getPromptSectionScrollTop(promptElement);
 		if (direction === "previous" && promptTop < currentTop - threshold) {
 			target = promptElement;
 		}
@@ -496,12 +742,16 @@ function jumpToUserPrompt(direction) {
 	}
 
 	if (target) {
-		scrollMessagesTo(getMessageScrollTop(target), true);
+		scrollMessagesTo(getPromptSectionScrollTop(target), true);
 		return;
 	}
 	if (direction === "next") {
 		scrollToBottom(true);
 	}
+}
+
+function getPromptSectionScrollTop(promptElement) {
+	return getMessageScrollTop(promptElement.closest(".conversation-turn") ?? promptElement);
 }
 
 function getMessageScrollTop(element) {
@@ -528,9 +778,14 @@ function updateConversationNavButtons() {
 
 function keepLoadingAtBottom() {
 	const loading = messagesContent.querySelector(".message.loading");
-	if (loading && loading !== messagesContent.lastElementChild) {
-		messagesContent.append(loading);
+	const parent = loading?.parentElement;
+	if (loading && parent && loading !== parent.lastElementChild) {
+		parent.append(loading);
 	}
+}
+
+function finishContentUpdate() {
+	scrollToBottom();
 }
 
 function scrollMessagesTo(top, smooth) {

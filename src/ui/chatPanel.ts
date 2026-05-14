@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
@@ -15,6 +15,15 @@ type WebviewMessage = {
 	modelKey?: string;
 	message?: string;
 	details?: unknown;
+	includeIdeContext?: boolean;
+};
+
+type IdeContext = {
+	label: string;
+	filePath: string;
+	languageId: string;
+	selectionRange?: string;
+	selectedText?: string;
 };
 
 type SessionInfo = {
@@ -50,7 +59,9 @@ export class CrustChatPanel implements vscode.Disposable {
 	private activeLoadingMessageId: string | undefined;
 	private hasSessionTitle = false;
 	private activeToolCallIds = new Map<number, string>();
+	private activeToolCallArgs = new Map<string, unknown>();
 	private activeTextMessageIds = new Map<number, string>();
+	private lastActiveTextEditor = vscode.window.activeTextEditor;
 
 	static show(context: vscode.ExtensionContext): void {
 		void CrustChatPanel.open(context);
@@ -87,6 +98,17 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.output,
 			this.panel.onDidDispose(() => this.dispose()),
 			this.panel.webview.onDidReceiveMessage((message: WebviewMessage) => this.handleWebviewMessage(message)),
+			vscode.window.onDidChangeActiveTextEditor((editor) => {
+				if (editor) {
+					this.lastActiveTextEditor = editor;
+				}
+				this.postIdeContext();
+			}),
+			vscode.window.onDidChangeTextEditorSelection((event) => {
+				if (event.textEditor === this.lastActiveTextEditor) {
+					this.postIdeContext();
+				}
+			}),
 			this.client.onEvent((event) => this.handlePiEvent(event)),
 			this.client.onError((message) => this.post({ type: 'error', message })),
 		);
@@ -104,6 +126,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private async initialize(): Promise<void> {
+		this.postIdeContext();
 		try {
 			this.log('Initializing Pi RPC client');
 			await this.client.start();
@@ -130,7 +153,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.log('Received webview message', { type: message.type });
 		switch (message.type) {
 			case 'submit':
-				await this.submitPrompt(message.text ?? '');
+				await this.submitPrompt(message.text ?? '', message.includeIdeContext !== false);
 				break;
 			case 'selectModel':
 				await this.selectModel(message.modelKey);
@@ -138,9 +161,34 @@ export class CrustChatPanel implements vscode.Disposable {
 			case 'showHistory':
 				await this.showHistory();
 				break;
+			case 'newChat':
+				await this.newChat();
+				break;
 			case 'webviewLog':
 				this.log(`Webview: ${message.message ?? ''}`, message.details);
 				break;
+		}
+	}
+
+	private async newChat(): Promise<void> {
+		if (this.isStreaming) {
+			void vscode.window.showInformationMessage('Wait for the current response to finish before starting a new chat.');
+			return;
+		}
+
+		try {
+			this.log('Starting new chat');
+			const switched = await this.client.newSession();
+			if (!switched) {
+				return;
+			}
+			this.resetConversationState();
+			this.post({ type: 'clearMessages' });
+			this.post({ type: 'sessionTitle', title: 'New Chat' });
+			await this.postSessionStatus([]);
+			this.postIdeContext();
+		} catch (error) {
+			this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
 		}
 	}
 
@@ -180,11 +228,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 
-		this.activeThinkingMessageId = undefined;
-		this.activeLoadingMessageId = undefined;
-		this.activeToolCallIds.clear();
-		this.activeTextMessageIds.clear();
-		this.hasSessionTitle = false;
+		this.resetConversationState();
 		this.post({ type: 'clearMessages' });
 
 		const messages = await this.client.getMessages();
@@ -196,10 +240,20 @@ export class CrustChatPanel implements vscode.Disposable {
 			firstUserMessage ??= restoredFirstUserMessage;
 		}
 
-		const title = session.name || firstUserMessage || 'New Chat';
+		const title = session.name ? this.extractRestoredPrompt(session.name).text : firstUserMessage || 'New Chat';
 		this.hasSessionTitle = Boolean(firstUserMessage || session.name);
 		this.post({ type: 'sessionTitle', title: this.truncate(title, 50) });
 		await this.postSessionStatus(messages);
+	}
+
+	private resetConversationState(): void {
+		this.activeThinkingMessageId = undefined;
+		this.activeLoadingMessageId = undefined;
+		this.activeToolCallIds.clear();
+		this.activeToolCallArgs.clear();
+		this.activeTextMessageIds.clear();
+		this.hasSessionTitle = false;
+		this.isStreaming = false;
 	}
 
 	private restoreMessage(
@@ -208,10 +262,16 @@ export class CrustChatPanel implements vscode.Disposable {
 	): string | undefined {
 		const role = this.getMessageRole(message);
 		if (role === 'user') {
-			const text = this.getMessageText(message).trim();
-			if (text) {
-				this.post({ type: 'addMessage', id: this.createId('user'), role: 'user', text });
-				return text;
+			const restoredPrompt = this.extractRestoredPrompt(this.getMessageText(message).trim());
+			if (restoredPrompt.text) {
+				this.post({
+					type: 'addMessage',
+					id: this.createId('user'),
+					role: 'user',
+					text: restoredPrompt.text,
+					ideContextLabel: restoredPrompt.ideContextLabel,
+				});
+				return restoredPrompt.text;
 			}
 			return undefined;
 		}
@@ -445,9 +505,88 @@ export class CrustChatPanel implements vscode.Disposable {
 			: '';
 	}
 
-	private async submitPrompt(text: string): Promise<void> {
+	private postIdeContext(): void {
+		const ideContext = this.getIdeContext();
+		this.post({ type: 'ideContext', label: ideContext?.label });
+	}
+
+	private getIdeContext(): IdeContext | undefined {
+		const editor = this.lastActiveTextEditor;
+		if (!editor) {
+			return undefined;
+		}
+
+		const uri = editor.document.uri;
+		if (uri.scheme !== 'file' && uri.scheme !== 'untitled') {
+			return undefined;
+		}
+
+		const filePath = uri.scheme === 'file'
+			? vscode.workspace.asRelativePath(uri, false)
+			: editor.document.fileName;
+		const fileName = basename(filePath) || filePath;
+		const selection = editor.selection;
+		if (selection && !selection.isEmpty) {
+			const selectionRange = this.formatSelectionRange(selection);
+			return {
+				label: `${fileName}:${selectionRange}`,
+				filePath,
+				languageId: editor.document.languageId,
+				selectionRange,
+				selectedText: editor.document.getText(selection),
+			};
+		}
+
+		return { label: fileName, filePath, languageId: editor.document.languageId };
+	}
+
+	private formatSelectionRange(selection: vscode.Selection): string {
+		const startLine = selection.start.line + 1;
+		const endLine = selection.end.character === 0 && selection.end.line > selection.start.line
+			? selection.end.line
+			: selection.end.line + 1;
+		return startLine === endLine ? String(startLine) : `${startLine}-${endLine}`;
+	}
+
+	private buildPromptWithIdeContext(prompt: string, ideContext: IdeContext): string {
+		const lines = [
+			'<ide_context>',
+			`Current file: ${ideContext.filePath}`,
+		];
+		if (ideContext.selectionRange && ideContext.selectedText !== undefined) {
+			lines.push(
+				`Selected lines: ${ideContext.selectionRange}`,
+				'Selected text:',
+				`\`\`\`${ideContext.languageId}`,
+				ideContext.selectedText,
+				'```',
+			);
+		}
+		lines.push('</ide_context>', '', prompt);
+		return lines.join('\n');
+	}
+
+	private extractRestoredPrompt(text: string): { text: string; ideContextLabel?: string } {
+		const match = text.match(/^<ide_context>\n([\s\S]*?)\n<\/ide_context>\n*/);
+		if (!match) {
+			return { text };
+		}
+
+		const contextText = match[1];
+		const filePath = contextText.match(/^Current file: (.+)$/m)?.[1]?.trim();
+		const selectedLines = contextText.match(/^Selected lines: (.+)$/m)?.[1]?.trim();
+		const fileName = filePath ? basename(filePath) : undefined;
+		return {
+			text: text.slice(match[0].length).trimStart(),
+			ideContextLabel: fileName ? `${fileName}${selectedLines ? `:${selectedLines}` : ''}` : undefined,
+		};
+	}
+
+	private async submitPrompt(text: string, includeIdeContext: boolean): Promise<void> {
 		const trimmed = text.trim();
-		this.log('Submitting prompt', { length: trimmed.length, followUp: this.isStreaming });
+		const ideContext = includeIdeContext ? this.getIdeContext() : undefined;
+		const promptText = ideContext ? this.buildPromptWithIdeContext(trimmed, ideContext) : trimmed;
+		this.log('Submitting prompt', { length: trimmed.length, promptLength: promptText.length, followUp: this.isStreaming, ideContext: ideContext?.label });
 		if (!trimmed) {
 			return;
 		}
@@ -459,12 +598,12 @@ export class CrustChatPanel implements vscode.Disposable {
 		const userMessageId = this.createId('user');
 		this.activeLoadingMessageId = this.createId('loading');
 		this.activeTextMessageIds.clear();
-		this.post({ type: 'addMessage', id: userMessageId, role: 'user', text: trimmed });
+		this.post({ type: 'addMessage', id: userMessageId, role: 'user', text: trimmed, ideContextLabel: ideContext?.label });
 		this.post({ type: 'addMessage', id: this.activeLoadingMessageId, role: 'assistant', text: '', loading: true });
 		this.postUsageStatus([]);
 
 		try {
-			await this.client.prompt(trimmed, this.isStreaming ? 'followUp' : undefined);
+			await this.client.prompt(promptText, this.isStreaming ? 'followUp' : undefined);
 		} catch (error) {
 			this.log('Prompt failed', { error: error instanceof Error ? error.message : String(error) });
 			const assistantMessageId = this.getStreamingTextMessageId(0);
@@ -494,6 +633,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.isStreaming = true;
 			this.activeThinkingMessageId = undefined;
 			this.activeToolCallIds.clear();
+			this.activeToolCallArgs.clear();
 			this.activeTextMessageIds.clear();
 			return;
 		}
@@ -502,6 +642,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.isStreaming = false;
 			this.activeThinkingMessageId = undefined;
 			this.activeToolCallIds.clear();
+			this.activeToolCallArgs.clear();
 			this.activeTextMessageIds.clear();
 			this.removeActiveLoadingMessage();
 			void this.refreshUsageStatus();
@@ -565,14 +706,15 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 
+		const args = event.args ?? (event.toolCallId ? this.activeToolCallArgs.get(event.toolCallId) : undefined);
 		const id = this.toolElementId(event.toolCallId);
 		this.post({
 			type: 'upsertTool',
 			id,
 			toolName: event.toolName,
-			path: this.getToolPath(event.args),
+			path: this.getToolPath(args),
 			status: 'running',
-			body: this.getToolBody(event.toolName, event.args),
+			body: this.getToolBody(event.toolName, args),
 		});
 	}
 
@@ -581,11 +723,12 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 
+		const args = event.args ?? (event.toolCallId ? this.activeToolCallArgs.get(event.toolCallId) : undefined);
 		this.post({
 			type: 'upsertTool',
 			id: this.toolElementId(event.toolCallId),
 			toolName: event.toolName,
-			path: this.getToolPath(event.args),
+			path: this.getToolPath(args),
 			status: 'running',
 			body: this.getToolResultText(event.partialResult),
 		});
@@ -596,14 +739,15 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 
+		const args = event.args ?? (event.toolCallId ? this.activeToolCallArgs.get(event.toolCallId) : undefined);
 		const diff = typeof event.result?.details?.diff === 'string' ? event.result.details.diff : undefined;
 		this.post({
 			type: 'upsertTool',
 			id: this.toolElementId(event.toolCallId),
 			toolName: event.toolName,
-			path: this.getToolPath(event.args),
+			path: this.getToolPath(args),
 			status: event.isError ? 'error' : 'done',
-			body: event.toolName === 'read' ? undefined : diff ?? this.getToolResultText(event.result) ?? this.getToolBody(event.toolName, event.args),
+			body: event.toolName === 'read' ? undefined : diff ?? this.getToolResultText(event.result) ?? this.getToolBody(event.toolName, args),
 			isDiff: Boolean(diff),
 		});
 	}
@@ -611,8 +755,8 @@ export class CrustChatPanel implements vscode.Disposable {
 	private showStreamingThinking(event: RpcEvent): void {
 		const assistantEvent = event.assistantMessageEvent;
 		if (assistantEvent?.type === 'thinking_start') {
-			this.activeThinkingMessageId = this.createId('thinking');
-			this.post({ type: 'addThinking', id: this.activeThinkingMessageId });
+			this.activeThinkingMessageId = undefined;
+			return;
 		}
 
 		if (assistantEvent?.type === 'thinking_delta' && assistantEvent.delta) {
@@ -635,8 +779,15 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 
+		if (toolCall.id && toolCall.args !== undefined) {
+			this.activeToolCallArgs.set(toolCall.id, toolCall.args);
+		}
 		const contentIndex = assistantEvent.contentIndex ?? 0;
-		const id = this.activeToolCallIds.get(contentIndex) ?? this.createId('toolcall');
+		const existingId = this.activeToolCallIds.get(contentIndex);
+		const id = toolCall.id ? this.toolElementId(toolCall.id) : existingId ?? this.createId('toolcall');
+		if (toolCall.id && existingId && existingId !== id) {
+			this.post({ type: 'removeMessage', id: existingId });
+		}
 		this.activeToolCallIds.set(contentIndex, id);
 		this.post({
 			type: 'upsertTool',
@@ -649,7 +800,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		});
 	}
 
-	private extractToolCall(event: RpcEvent): { name?: string; args?: unknown } {
+	private extractToolCall(event: RpcEvent): { id?: string; name?: string; args?: unknown } {
 		const assistantEvent = event.assistantMessageEvent;
 		const candidates = [
 			assistantEvent?.toolCall,
@@ -657,8 +808,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.getMessageContentAt(event.message, assistantEvent?.contentIndex),
 		];
 		const candidate = candidates.find((value) => typeof value === 'object' && value !== null);
-		const record = candidate as { name?: unknown; toolName?: unknown; arguments?: unknown; args?: unknown } | undefined;
+		const record = candidate as { id?: unknown; name?: unknown; toolName?: unknown; arguments?: unknown; args?: unknown } | undefined;
 		return {
+			id: typeof record?.id === 'string' ? record.id : event.toolCallId,
 			name: typeof record?.name === 'string' ? record.name : typeof record?.toolName === 'string' ? record.toolName : undefined,
 			args: record?.arguments ?? record?.args,
 		};
@@ -790,7 +942,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				const role = this.getMessageRole(message);
 				const text = this.getMessageText(message).trim();
 				if (role === 'user' && firstMessage === '(no messages)' && text) {
-					firstMessage = text;
+					firstMessage = this.extractRestoredPrompt(text).text;
 				}
 				const timestamp = this.getMessageTimestamp(message) ?? this.getEntryTimestamp(entry);
 				if (timestamp && timestamp > modified.getTime()) {

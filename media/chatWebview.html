@@ -11,14 +11,21 @@
 	<div class="app">
 		<header class="title-bar">
 			<div id="session-title" class="session-title">New Chat</div>
-			<button id="history" class="history-button" type="button" aria-label="Show chat history" title="History">
-				<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-					<path d="M3.25 4.75A5.5 5.5 0 1 1 2.5 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-					<path d="M3.25 2.25v2.5h2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-					<path d="M8 5.25V8l2 1.25" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-				</svg>
-				<span>History</span>
-			</button>
+			<div class="title-actions">
+				<button id="history" class="title-action-button" type="button" aria-label="Show chat history" title="History">
+					<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<path d="M3.25 4.75A5.5 5.5 0 1 1 2.5 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+						<path d="M3.25 2.25v2.5h2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+						<path d="M8 5.25V8l2 1.25" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+					</svg>
+				</button>
+				<button id="new-chat" class="title-action-button" type="button" aria-label="New chat" title="New chat">
+					<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<path d="M8 3.25v9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+						<path d="M3.25 8h9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+					</svg>
+				</button>
+			</div>
 		</header>
 		<main id="messages" class="messages" aria-live="polite">
 			<div id="empty-state" class="empty-state">
@@ -61,7 +68,21 @@
 		</nav>
 		<form id="form" class="controls">
 			<div class="input-row">
-				<textarea id="prompt" rows="1" placeholder="Ask Pi…"></textarea>
+				<div class="prompt-column">
+					<button id="ide-context" class="ide-context-button hidden" type="button" aria-pressed="true" title="Use IDE context">
+						<svg class="eye-open" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<path d="M1.75 8S4 4.25 8 4.25S14.25 8 14.25 8S12 11.75 8 11.75S1.75 8 1.75 8Z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+							<circle cx="8" cy="8" r="1.75" stroke="currentColor" stroke-width="1.3"/>
+						</svg>
+						<svg class="eye-off" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<path d="M1.75 8S4 4.25 8 4.25S14.25 8 14.25 8S12 11.75 8 11.75S1.75 8 1.75 8Z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+							<circle cx="8" cy="8" r="1.75" stroke="currentColor" stroke-width="1.3"/>
+							<path d="M3 13L13 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+						</svg>
+						<span id="ide-context-label"></span>
+					</button>
+					<textarea id="prompt" rows="1" placeholder="Ask Pi…"></textarea>
+				</div>
 				<button type="submit" aria-label="Submit prompt" title="Submit prompt">
 					<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
 						<path d="M8 13V3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>

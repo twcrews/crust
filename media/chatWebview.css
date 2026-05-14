@@ -9,6 +9,9 @@ body {
 	background: var(--vscode-sideBar-background);
 	font-family: var(--vscode-font-family);
 }
+[hidden] {
+	display: none !important;
+}
 .app {
 	height: 100vh;
 	display: flex;
@@ -31,18 +34,17 @@ body {
 	white-space: nowrap;
 	font-weight: 600;
 }
-.history-button {
+.title-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+.title-action-button {
 	align-self: center;
-	width: auto;
-	min-height: 28px;
-	gap: 6px;
-	padding: 0 10px;
-	border-radius: 4px;
-	font-size: 12px;
 	color: var(--vscode-foreground);
 	background: transparent;
 }
-.history-button:hover {
+.title-action-button:hover {
 	background: var(--vscode-toolbar-hoverBackground, transparent);
 }
 .messages {
@@ -93,26 +95,76 @@ body {
 	line-height: 1.45;
 }
 
+.conversation-turn {
+	position: relative;
+	display: flow-root;
+}
 .message {
 	box-sizing: border-box;
 	width: 100%;
 	max-width: 100%;
 	margin: 0 0 14px;
 	padding: 4px 0 4px 12px;
-	border-left: 3px solid var(--vscode-sideBar-border);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 	line-height: 1.45;
 }
 .user {
+	position: sticky;
+	top: 8px;
+	z-index: 2;
 	width: fit-content;
 	max-width: 80%;
 	margin-left: auto;
 	padding: 10px 12px;
-	border-left: none;
 	border-radius: 8px;
 	background: var(--vscode-button-background);
 	color: var(--vscode-button-foreground);
+	box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
+}
+.message-context {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: 100%;
+	min-height: 20px;
+	margin-bottom: 6px;
+	padding: 0 6px;
+	overflow: hidden;
+	border-radius: 4px;
+	font-size: 11px;
+	background: color-mix(in srgb, currentColor 12%, transparent);
+	opacity: 0.82;
+}
+.message-context span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.user-message-body {
+	white-space: pre-wrap;
+}
+.user.collapsible:not(.expanded) .user-message-body {
+	display: -webkit-box;
+	max-height: calc(1.45em * 2);
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+}
+.user-message-toggle {
+	align-self: flex-start;
+	width: auto;
+	min-height: auto;
+	margin-top: 6px;
+	padding: 0;
+	font-size: 11px;
+	color: inherit;
+	background: transparent;
+	opacity: 0.82;
+}
+.user-message-toggle:hover {
+	background: transparent;
+	opacity: 1;
 }
 .user-prompt-divider {
 	box-sizing: border-box;
@@ -125,7 +177,7 @@ body {
 	border-top: 1px solid var(--vscode-sideBar-border);
 }
 .assistant {
-	border-left-color: var(--vscode-editor-inactiveSelectionBackground);
+	border: none;
 }
 .message.assistant,
 .thinking-body {
@@ -140,7 +192,11 @@ body {
 .message.assistant ul:last-child,
 .thinking-body ul:last-child,
 .message.assistant pre:last-child,
-.thinking-body pre:last-child {
+.thinking-body pre:last-child,
+.message.assistant hr:last-child,
+.thinking-body hr:last-child,
+.message.assistant .markdown-table-wrapper:last-child,
+.thinking-body .markdown-table-wrapper:last-child {
 	margin-bottom: 0;
 }
 .message.assistant h1,
@@ -168,7 +224,6 @@ body {
 .thinking-body blockquote {
 	margin: 0 0 0.75em;
 	padding-left: 10px;
-	border-left: 3px solid var(--vscode-sideBar-border);
 	color: var(--vscode-descriptionForeground);
 }
 .message.assistant code,
@@ -192,13 +247,43 @@ body {
 	padding: 0;
 	background: transparent;
 }
+.message.assistant hr,
+.thinking-body hr {
+	height: 0;
+	margin: 1em 0;
+	border: 0;
+	border-top: 1px solid var(--vscode-sideBar-border);
+}
+.markdown-table-wrapper {
+	max-width: 100%;
+	margin: 0 0 0.75em;
+	overflow-x: auto;
+}
+.message.assistant table,
+.thinking-body table {
+	width: max-content;
+	min-width: 100%;
+	border-collapse: collapse;
+}
+.message.assistant th,
+.message.assistant td,
+.thinking-body th,
+.thinking-body td {
+	padding: 6px 8px;
+	border: 1px solid var(--vscode-sideBar-border);
+	vertical-align: top;
+}
+.message.assistant th,
+.thinking-body th {
+	font-weight: 600;
+	background: var(--vscode-editor-inactiveSelectionBackground);
+}
 .thinking-card {
 	box-sizing: border-box;
 	width: 100%;
 	max-width: 100%;
 	margin: 0 0 14px;
 	padding-left: 9px;
-	border-left: 3px solid var(--vscode-sideBar-border);
 }
 .tool-card {
 	box-sizing: border-box;
@@ -259,16 +344,24 @@ body {
 	font-size: 12px;
 	font-weight: 600;
 	color: var(--vscode-descriptionForeground);
-	background: var(--vscode-editor-inactiveSelectionBackground);
 }
 .tool-card.no-body {
+	position: relative;
 	width: 100%;
 	max-width: 100%;
-	padding-left: 9px;
+	padding-left: 16px;
 	border: none;
-	border-left: 3px solid var(--vscode-sideBar-border);
 	border-radius: 0;
 	background: transparent;
+}
+.tool-card.no-body::before {
+	content: '•';
+	position: absolute;
+	left: 2px;
+	top: 4px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 14px;
+	line-height: 1;
 }
 .tool-card.no-body .tool-header {
 	padding: 4px 0;
@@ -294,9 +387,11 @@ body {
 	font-family: var(--vscode-editor-font-family, monospace);
 	font-size: var(--vscode-editor-font-size, 12px);
 	line-height: 1.4;
+	background-color: var(--vscode-editor-background);
+	border-top: 1px solid var(--vscode-sideBar-border);	
 }
 .tool-body.diff {
-	background: var(--vscode-diffEditor-unchangedRegionBackground, var(--vscode-editor-background));
+	background: var(--vscode-editor-background);
 }
 .diff-line {
 	display: inline-block;
@@ -316,7 +411,6 @@ body {
 }
 .message.user.loading {
 	padding: 4px 0 4px 12px;
-	border-left: 3px solid var(--vscode-sideBar-border);
 	border-radius: 0;
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
@@ -346,6 +440,46 @@ body {
     border-radius: 8px;
 	background: var(--vscode-input-background);
 }
+.prompt-column {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	flex-direction: column;
+	gap: 2px;
+}
+.ide-context-button {
+	align-self: flex-start;
+	width: auto;
+	max-width: 100%;
+	min-height: 24px;
+	gap: 5px;
+	padding: 0 6px;
+	overflow: hidden;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+}
+.ide-context-button:hover {
+	background: var(--vscode-toolbar-hoverBackground, transparent);
+}
+.ide-context-button.hidden {
+	display: none;
+}
+.ide-context-button.disabled {
+	opacity: 0.5;
+}
+.ide-context-button .eye-off,
+.ide-context-button.disabled .eye-open {
+	display: none;
+}
+.ide-context-button.disabled .eye-off {
+	display: block;
+}
+#ide-context-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
 .input-row:focus-within {
 	border-color: var(--vscode-button-background);
 	box-shadow:
@@ -354,7 +488,7 @@ body {
 }
 textarea {
 	box-sizing: border-box;
-	flex: 1;
+	width: 100%;
 	resize: none;
 	height: 28px;
 	max-height: 180px;

@@ -75,6 +75,12 @@ export class PiRpcClient implements vscode.Disposable {
 		return !data?.cancelled;
 	}
 
+	async newSession(): Promise<boolean> {
+		const response = await this.send({ type: 'new_session' });
+		const data = response.data as { cancelled?: boolean } | undefined;
+		return !data?.cancelled;
+	}
+
 	async setModel(model: Model): Promise<void> {
 		await this.send({ type: 'set_model', provider: model.provider, modelId: model.id });
 	}
