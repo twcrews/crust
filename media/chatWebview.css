@@ -127,6 +127,71 @@ body {
 .assistant {
 	border-left-color: var(--vscode-editor-inactiveSelectionBackground);
 }
+.message.assistant,
+.thinking-body {
+	white-space: normal;
+}
+.message.assistant p,
+.thinking-body p {
+	margin: 0 0 0.75em;
+}
+.message.assistant p:last-child,
+.thinking-body p:last-child,
+.message.assistant ul:last-child,
+.thinking-body ul:last-child,
+.message.assistant pre:last-child,
+.thinking-body pre:last-child {
+	margin-bottom: 0;
+}
+.message.assistant h1,
+.message.assistant h2,
+.message.assistant h3,
+.message.assistant h4,
+.message.assistant h5,
+.message.assistant h6,
+.thinking-body h1,
+.thinking-body h2,
+.thinking-body h3,
+.thinking-body h4,
+.thinking-body h5,
+.thinking-body h6 {
+	margin: 0 0 0.6em;
+	font-size: 1em;
+	font-weight: 600;
+}
+.message.assistant ul,
+.thinking-body ul {
+	margin: 0 0 0.75em;
+	padding-left: 1.4em;
+}
+.message.assistant blockquote,
+.thinking-body blockquote {
+	margin: 0 0 0.75em;
+	padding-left: 10px;
+	border-left: 3px solid var(--vscode-sideBar-border);
+	color: var(--vscode-descriptionForeground);
+}
+.message.assistant code,
+.thinking-body code {
+	padding: 0.1em 0.3em;
+	border-radius: 3px;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 0.95em;
+	background: var(--vscode-textCodeBlock-background, var(--vscode-editor-inactiveSelectionBackground));
+}
+.message.assistant pre,
+.thinking-body pre {
+	margin: 0 0 0.75em;
+	padding: 10px;
+	overflow: auto;
+	border-radius: 6px;
+	background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));
+}
+.message.assistant pre code,
+.thinking-body pre code {
+	padding: 0;
+	background: transparent;
+}
 .thinking-card {
 	box-sizing: border-box;
 	width: 100%;
@@ -179,9 +244,7 @@ body {
 	margin: 0;
 	padding: 6px 0 4px;
 	overflow: auto;
-	white-space: pre-wrap;
-	font-family: var(--vscode-editor-font-family, monospace);
-	font-size: var(--vscode-editor-font-size, 12px);
+	font-size: 12px;
 	line-height: 1.4;
 	color: var(--vscode-descriptionForeground);
 }

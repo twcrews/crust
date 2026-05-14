@@ -8,6 +8,7 @@ type PendingRequest = {
 };
 
 export class PiRpcClient implements vscode.Disposable {
+	private static readonly output = vscode.window.createOutputChannel('Crust Pi RPC');
 	private process: ChildProcessWithoutNullStreams | undefined;
 	private buffer = '';
 	private nextId = 1;
@@ -25,6 +26,7 @@ export class PiRpcClient implements vscode.Disposable {
 			return;
 		}
 
+		this.log('Starting Pi RPC process', { cwd: this.cwd });
 		this.process = spawn('pi', ['--mode', 'rpc'], {
 			cwd: this.cwd,
 			env: process.env,
@@ -34,9 +36,16 @@ export class PiRpcClient implements vscode.Disposable {
 		this.process.stderr.setEncoding('utf8');
 
 		this.process.stdout.on('data', (chunk: string) => this.handleStdout(chunk));
-		this.process.stderr.on('data', (chunk: string) => this.errorEmitter.fire(chunk.trim()));
-		this.process.on('error', (error) => this.failAll(error));
+		this.process.stderr.on('data', (chunk: string) => {
+			this.log('Pi RPC stderr', { message: chunk.trim() });
+			this.errorEmitter.fire(chunk.trim());
+		});
+		this.process.on('error', (error) => {
+			this.log('Pi RPC process error', { error: error.message });
+			this.failAll(error);
+		});
 		this.process.on('exit', (code, signal) => {
+			this.log('Pi RPC process exited', { code, signal });
 			this.errorEmitter.fire(`Pi exited${code === null ? '' : ` with code ${code}`}${signal ? ` (${signal})` : ''}.`);
 			this.process = undefined;
 			this.failAll(new Error('Pi RPC process exited.'));
@@ -90,6 +99,7 @@ export class PiRpcClient implements vscode.Disposable {
 		}
 
 		const id = `crust-${this.nextId++}`;
+		this.log('Sending Pi RPC command', { id, type: command.type });
 		const payload = JSON.stringify({ id, ...command });
 		const response = await new Promise<RpcResponse>((resolve, reject) => {
 			this.pending.set(id, { resolve, reject });
@@ -101,6 +111,7 @@ export class PiRpcClient implements vscode.Disposable {
 			});
 		});
 
+		this.log('Received Pi RPC response', { id, command: response.command, success: response.success });
 		if (!response.success) {
 			throw new Error(response.error ?? `${response.command} failed`);
 		}
@@ -132,9 +143,11 @@ export class PiRpcClient implements vscode.Disposable {
 			if (isRpcResponse(message)) {
 				this.handleResponse(message);
 			} else if (isRpcEvent(message)) {
+				this.log('Received Pi RPC event', { type: message.type, assistantEventType: message.assistantMessageEvent?.type, toolName: message.toolName });
 				this.eventEmitter.fire(message);
 			}
 		} catch (error) {
+			this.log('Failed to parse Pi RPC output', { error: error instanceof Error ? error.message : String(error), line });
 			this.errorEmitter.fire(`Failed to parse Pi RPC output: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
@@ -151,6 +164,12 @@ export class PiRpcClient implements vscode.Disposable {
 
 		this.pending.delete(response.id);
 		pending.resolve(response);
+	}
+
+	private log(message: string, details?: unknown): void {
+		const timestamp = new Date().toISOString();
+		const suffix = details === undefined ? '' : ` ${JSON.stringify(details)}`;
+		PiRpcClient.output.appendLine(`[${timestamp}] ${message}${suffix}`);
 	}
 
 	private failAll(error: Error): void {

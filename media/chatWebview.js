@@ -13,6 +13,21 @@ const jumpPreviousUser = document.getElementById("jump-previous-user");
 const jumpNextUser = document.getElementById("jump-next-user");
 const jumpBottom = document.getElementById("jump-bottom");
 
+window.addEventListener("error", (event) => {
+	postWebviewLog("Webview error", {
+		message: event.message,
+		filename: event.filename,
+		lineno: event.lineno,
+		colno: event.colno,
+	});
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+	postWebviewLog("Webview unhandled rejection", { reason: String(event.reason) });
+});
+
+logWebview("Chat webview loaded");
+
 form.addEventListener("submit", (event) => {
 	event.preventDefault();
 	const text = prompt.value;
@@ -21,6 +36,7 @@ form.addEventListener("submit", (event) => {
 	}
 	prompt.value = "";
 	autoResizePrompt();
+	logWebview("Submitting prompt", { length: text.trim().length });
 	vscode.postMessage({ type: "submit", text });
 });
 
@@ -63,6 +79,7 @@ updateConversationNavButtons();
 
 window.addEventListener("message", (event) => {
 	const message = event.data;
+	logWebview("Received extension message", getMessageLogDetails(message));
 	if (message.type === "models") {
 		setModels(message.models ?? [], message.selected);
 	}
@@ -98,6 +115,30 @@ window.addEventListener("message", (event) => {
 		appendThinking(message.id, message.text ?? "");
 	}
 });
+
+function logWebview(message, details) {
+	if (details === undefined) {
+		console.log("[Crust]", message);
+		return;
+	}
+	console.log("[Crust]", message, details);
+}
+
+function postWebviewLog(message, details) {
+	logWebview(message, details);
+	vscode.postMessage({ type: "webviewLog", message, details });
+}
+
+function getMessageLogDetails(message) {
+	return {
+		type: message?.type,
+		id: message?.id,
+		role: message?.role,
+		status: message?.status,
+		textLength: typeof message?.text === "string" ? message.text.length : undefined,
+		bodyLength: typeof message?.body === "string" ? message.body.length : undefined,
+	};
+}
 
 function setSessionTitle(title) {
 	sessionTitle.textContent = title;
@@ -136,7 +177,11 @@ function addMessage(id, role, text, loading) {
 	const element = document.createElement("div");
 	element.id = id;
 	element.className = "message " + role + (loading ? " loading" : "");
-	element.textContent = text;
+	if (role === "assistant" && !loading) {
+		setMarkdownContent(element, text);
+	} else {
+		element.textContent = text;
+	}
 	messagesContent.append(element);
 	updateEmptyState();
 	keepLoadingAtBottom();
@@ -149,7 +194,11 @@ function appendMessage(id, text) {
 		return;
 	}
 	element.classList.remove("loading");
-	element.textContent += text;
+	if (element.classList.contains("assistant")) {
+		setMarkdownContent(element, (element.dataset.markdown ?? "") + text);
+	} else {
+		element.textContent += text;
+	}
 	keepLoadingAtBottom();
 	scrollToBottom();
 }
@@ -190,7 +239,7 @@ function addThinking(id) {
 	});
 	element.append(button);
 
-	const body = document.createElement("pre");
+	const body = document.createElement("div");
 	body.className = "thinking-body";
 	element.append(body);
 	messagesContent.append(element);
@@ -204,9 +253,144 @@ function appendThinking(id, text) {
 	if (!body) {
 		return;
 	}
-	body.textContent += text;
+	setMarkdownContent(body, (body.dataset.markdown ?? "") + text);
 	keepLoadingAtBottom();
 	scrollToBottom();
+}
+
+function setMarkdownContent(element, markdown) {
+	element.dataset.markdown = markdown;
+	renderMarkdown(element, markdown);
+}
+
+function renderMarkdown(element, markdown) {
+	element.textContent = "";
+	const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+	let index = 0;
+	let paragraph = [];
+
+	function flushParagraph() {
+		if (!paragraph.length) {
+			return;
+		}
+		const p = document.createElement("p");
+		renderInline(p, paragraph.join("\n"));
+		element.append(p);
+		paragraph = [];
+	}
+
+	while (index < lines.length) {
+		const line = lines[index];
+		const fence = line.match(/^\s*```(.*)$/);
+		if (fence) {
+			flushParagraph();
+			index++;
+			const codeLines = [];
+			while (index < lines.length && !/^\s*```/.test(lines[index])) {
+				codeLines.push(lines[index]);
+				index++;
+			}
+			if (index < lines.length) {
+				index++;
+			}
+			const pre = document.createElement("pre");
+			const code = document.createElement("code");
+			code.textContent = codeLines.join("\n");
+			pre.append(code);
+			element.append(pre);
+			continue;
+		}
+
+		if (!line.trim()) {
+			flushParagraph();
+			index++;
+			continue;
+		}
+
+		const heading = line.match(/^(#{1,6})\s+(.+)$/);
+		if (heading) {
+			flushParagraph();
+			const headingElement = document.createElement("h" + heading[1].length);
+			renderInline(headingElement, heading[2]);
+			element.append(headingElement);
+			index++;
+			continue;
+		}
+
+		const listItem = line.match(/^\s*[-*+]\s+(.+)$/);
+		if (listItem) {
+			flushParagraph();
+			const list = document.createElement("ul");
+			while (index < lines.length) {
+				const item = lines[index].match(/^\s*[-*+]\s+(.+)$/);
+				if (!item) {
+					break;
+				}
+				const li = document.createElement("li");
+				renderInline(li, item[1]);
+				list.append(li);
+				index++;
+			}
+			element.append(list);
+			continue;
+		}
+
+		const quote = line.match(/^>\s?(.*)$/);
+		if (quote) {
+			flushParagraph();
+			const blockquote = document.createElement("blockquote");
+			const quoteLines = [];
+			while (index < lines.length) {
+				const quoteLine = lines[index].match(/^>\s?(.*)$/);
+				if (!quoteLine) {
+					break;
+				}
+				quoteLines.push(quoteLine[1]);
+				index++;
+			}
+			renderInline(blockquote, quoteLines.join("\n"));
+			element.append(blockquote);
+			continue;
+		}
+
+		paragraph.push(line);
+		index++;
+	}
+	flushParagraph();
+}
+
+function renderInline(element, text) {
+	const pattern = /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
+	let lastIndex = 0;
+	for (const match of text.matchAll(pattern)) {
+		appendInlineText(element, text.slice(lastIndex, match.index));
+		const token = match[0];
+		if (token.startsWith("`")) {
+			const code = document.createElement("code");
+			code.textContent = token.slice(1, -1);
+			element.append(code);
+		} else if (token.startsWith("**") || token.startsWith("__")) {
+			const strong = document.createElement("strong");
+			strong.textContent = token.slice(2, -2);
+			element.append(strong);
+		} else {
+			const emphasis = document.createElement("em");
+			emphasis.textContent = token.slice(1, -1);
+			element.append(emphasis);
+		}
+		lastIndex = match.index + token.length;
+	}
+	appendInlineText(element, text.slice(lastIndex));
+}
+
+function appendInlineText(element, text) {
+	const parts = text.split("\n");
+	for (const [index, part] of parts.entries()) {
+		if (index > 0) {
+			element.append(document.createElement("br"));
+		}
+		element.append(document.createTextNode(part));
+	}
 }
 
 function upsertTool(message) {
@@ -235,7 +419,7 @@ function upsertTool(message) {
 	const path = message.path ? " " + message.path : "";
 	header.textContent = (message.toolName ?? "tool") + path + formatToolStatus(message.status);
 	header.title = header.textContent;
-	renderToolBody(body, message.body ?? "", Boolean(message.isDiff));
+	renderToolBody(body, message.body ?? "", Boolean(message.isDiff), message.path);
 	body.hidden = !hasBody;
 	body.classList.toggle("diff", Boolean(message.isDiff));
 	keepLoadingAtBottom();

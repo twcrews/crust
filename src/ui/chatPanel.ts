@@ -13,6 +13,8 @@ type WebviewMessage = {
 	type?: string;
 	text?: string;
 	modelKey?: string;
+	message?: string;
+	details?: unknown;
 };
 
 type SessionInfo = {
@@ -37,6 +39,7 @@ const execFileAsync = promisify(execFile);
 
 export class CrustChatPanel implements vscode.Disposable {
 	private static currentPanel: CrustChatPanel | undefined;
+	private readonly output = vscode.window.createOutputChannel('Crust');
 	private readonly disposables: vscode.Disposable[] = [];
 	private readonly cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 	private readonly client: PiRpcClient;
@@ -76,10 +79,12 @@ export class CrustChatPanel implements vscode.Disposable {
 		private readonly panel: vscode.WebviewPanel,
 	) {
 		this.client = new PiRpcClient(this.cwd);
+		this.log('Creating chat panel', { cwd: this.cwd });
 		this.panel.iconPath = this.getIconPath();
 		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview);
 
 		this.disposables.push(
+			this.output,
 			this.panel.onDidDispose(() => this.dispose()),
 			this.panel.webview.onDidReceiveMessage((message: WebviewMessage) => this.handleWebviewMessage(message)),
 			this.client.onEvent((event) => this.handlePiEvent(event)),
@@ -90,6 +95,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	dispose(): void {
+		this.log('Disposing chat panel');
 		CrustChatPanel.currentPanel = undefined;
 		this.client.dispose();
 		while (this.disposables.length) {
@@ -99,6 +105,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private async initialize(): Promise<void> {
 		try {
+			this.log('Initializing Pi RPC client');
 			await this.client.start();
 			const [models, state, messages] = await Promise.all([
 				this.client.getAvailableModels(),
@@ -111,13 +118,16 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
 			this.post({ type: 'models', models, selected: currentModel ? this.modelKey(currentModel) : undefined });
 			await this.postSessionStatus(messages);
+			this.log('Initialized chat panel', { modelCount: models.length, messageCount: messages.length, contextWindow: this.contextWindow });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
+			this.log('Failed to initialize chat panel', { error: message });
 			this.post({ type: 'error', message: `Unable to start Pi RPC: ${message}` });
 		}
 	}
 
 	private async handleWebviewMessage(message: WebviewMessage): Promise<void> {
+		this.log('Received webview message', { type: message.type });
 		switch (message.type) {
 			case 'submit':
 				await this.submitPrompt(message.text ?? '');
@@ -128,11 +138,15 @@ export class CrustChatPanel implements vscode.Disposable {
 			case 'showHistory':
 				await this.showHistory();
 				break;
+			case 'webviewLog':
+				this.log(`Webview: ${message.message ?? ''}`, message.details);
+				break;
 		}
 	}
 
 	private async showHistory(): Promise<void> {
 		try {
+			this.log('Loading session history');
 			const sessions = await this.listSessions();
 			if (!sessions.length) {
 				void vscode.window.showInformationMessage('No previous Pi sessions found.');
@@ -152,6 +166,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				return;
 			}
 
+			this.log('Selected session from history', { path: selected.session.path });
 			await this.restoreSession(selected.session);
 		} catch (error) {
 			this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
@@ -159,6 +174,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private async restoreSession(session: SessionInfo): Promise<void> {
+		this.log('Restoring session', { path: session.path });
 		const switched = await this.client.switchSession(session.path);
 		if (!switched) {
 			return;
@@ -172,6 +188,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.post({ type: 'clearMessages' });
 
 		const messages = await this.client.getMessages();
+		this.log('Fetched session messages', { count: messages.length });
 		const restoredToolCalls = new Map<string, { elementId: string; name?: string; args?: unknown }>();
 		let firstUserMessage: string | undefined;
 		for (const message of messages) {
@@ -430,6 +447,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private async submitPrompt(text: string): Promise<void> {
 		const trimmed = text.trim();
+		this.log('Submitting prompt', { length: trimmed.length, followUp: this.isStreaming });
 		if (!trimmed) {
 			return;
 		}
@@ -448,6 +466,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		try {
 			await this.client.prompt(trimmed, this.isStreaming ? 'followUp' : undefined);
 		} catch (error) {
+			this.log('Prompt failed', { error: error instanceof Error ? error.message : String(error) });
 			const assistantMessageId = this.getStreamingTextMessageId(0);
 			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\nError: ${error instanceof Error ? error.message : String(error)}` });
 			this.removeActiveLoadingMessage();
@@ -470,6 +489,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private handlePiEvent(event: RpcEvent): void {
+		this.log('Received Pi event', { type: event.type, assistantEventType: event.assistantMessageEvent?.type, toolName: event.toolName });
 		if (event.type === 'agent_start') {
 			this.isStreaming = true;
 			this.activeThinkingMessageId = undefined;
@@ -840,7 +860,36 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private post(message: unknown): void {
+		this.log('Posting webview message', this.getPostLogDetails(message));
 		void this.panel.webview.postMessage(message);
+	}
+
+	private getPostLogDetails(message: unknown): Record<string, unknown> | undefined {
+		if (typeof message !== 'object' || message === null) {
+			return undefined;
+		}
+		const record = message as { type?: unknown; id?: unknown; role?: unknown; text?: unknown; status?: unknown };
+		return {
+			type: record.type,
+			id: record.id,
+			role: record.role,
+			status: record.status,
+			textLength: typeof record.text === 'string' ? record.text.length : undefined,
+		};
+	}
+
+	private log(message: string, details?: unknown): void {
+		const timestamp = new Date().toISOString();
+		const suffix = details === undefined ? '' : ` ${this.stringifyLogDetails(details)}`;
+		this.output.appendLine(`[${timestamp}] ${message}${suffix}`);
+	}
+
+	private stringifyLogDetails(details: unknown): string {
+		try {
+			return JSON.stringify(details);
+		} catch {
+			return String(details);
+		}
 	}
 
 	private setSessionTitleFromPrompt(prompt: string): void {
