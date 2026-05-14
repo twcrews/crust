@@ -9,7 +9,7 @@ import { getMessageContent, getBlockText, getBlockType, getEntryTimestamp, getMe
 import { getPathSuggestions } from '../ui/pathAutocomplete';
 import { listSessions } from '../ui/sessionHistory';
 import { getChatWebviewHtml } from '../ui/chatWebview';
-import { getToolBody, getToolPath, getToolResultText, isFileTool } from '../ui/toolUtils';
+import { getToolBody, getToolHeaderDetail, getToolPath, getToolResultText, isFileTool, isRenderableTool } from '../ui/toolUtils';
 import { formatUsageStatus } from '../ui/usageStatus';
 import { getNonce } from '../utils/nonce';
 
@@ -98,21 +98,26 @@ suite('Tool utilities', () => {
 		assert.strictEqual(isFileTool('write'), true);
 		assert.strictEqual(isFileTool('edit'), true);
 		assert.strictEqual(isFileTool('bash'), false);
+		assert.strictEqual(isRenderableTool('bash'), true);
 		assert.strictEqual(getToolPath({ path: 'src/a.ts' }), 'src/a.ts');
 		assert.strictEqual(getToolPath({ file_path: 'src/b.ts' }), 'src/b.ts');
 		assert.strictEqual(getToolPath({ path: 1 }), undefined);
+		assert.strictEqual(getToolHeaderDetail('read', { path: 'src/a.ts' }), 'src/a.ts');
+		assert.strictEqual(getToolHeaderDetail('bash', { command: 'npm test' }), 'npm test');
 	});
 
 	test('builds previews for write and edit tools', () => {
 		assert.strictEqual(getToolBody('read', { path: 'src/a.ts' }), undefined);
 		assert.strictEqual(getToolBody('write', { content: 'new content' }), 'new content');
 		assert.strictEqual(getToolBody('edit', { edits: [{ oldText: 'old\ntext', newText: 'new' }] }), '@@ edit 1 @@\n-old\n-text\n+new');
+		assert.strictEqual(getToolBody('bash', { command: 'npm test' }), '$ npm test');
 		assert.strictEqual(getToolBody('edit', { edits: 'invalid' }), undefined);
 	});
 
 	test('extracts text-only tool result content', () => {
 		assert.strictEqual(getToolResultText({ content: [{ type: 'text', text: ' first ' }, { type: 'image', text: 'skip' }, { type: 'text', text: 'second' }] }), 'first \nsecond');
 		assert.strictEqual(getToolResultText({ content: [{ type: 'image', text: 'skip' }] }), undefined);
+		assert.strictEqual(getToolResultText({ details: { stdout: 'out', stderr: 'err' } }), 'out\nerr');
 		assert.strictEqual(getToolResultText(undefined), undefined);
 	});
 });

@@ -58,12 +58,16 @@
 }
 .tool-header {
 	padding: 7px 10px;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	overflow-x: auto;
+	overflow-y: hidden;
 	white-space: nowrap;
+	scrollbar-width: thin;
 	font-size: 12px;
-	font-weight: 600;
+	font-weight: 400;
 	color: var(--vscode-descriptionForeground);
+}
+.tool-name {
+	font-weight: 600;
 }
 .tool-card.no-body {
 	position: relative;

@@ -4,12 +4,23 @@ export function isFileTool(toolName: string | undefined): boolean {
 	return toolName === 'read' || toolName === 'write' || toolName === 'edit';
 }
 
+export function isRenderableTool(toolName: string | undefined): boolean {
+	return isFileTool(toolName) || toolName === 'bash';
+}
+
 export function getToolPath(args: unknown): string | undefined {
 	if (typeof args !== 'object' || args === null) {
 		return undefined;
 	}
 	const path = (args as { path?: unknown; file_path?: unknown }).path ?? (args as { file_path?: unknown }).file_path;
 	return typeof path === 'string' ? path : undefined;
+}
+
+export function getToolHeaderDetail(toolName: string | undefined, args: unknown): string | undefined {
+	if (toolName === 'bash') {
+		return getBashCommand(args);
+	}
+	return getToolPath(args);
 }
 
 export function getToolBody(toolName: string | undefined, args: unknown): string | undefined {
@@ -26,7 +37,20 @@ export function getToolBody(toolName: string | undefined, args: unknown): string
 		return getEditPreview(args);
 	}
 
+	if (toolName === 'bash') {
+		const command = getBashCommand(args);
+		return command ? `$ ${command}` : undefined;
+	}
+
 	return undefined;
+}
+
+function getBashCommand(args: unknown): string | undefined {
+	if (typeof args !== 'object' || args === null) {
+		return undefined;
+	}
+	const command = (args as { command?: unknown; cmd?: unknown }).command ?? (args as { cmd?: unknown }).cmd;
+	return typeof command === 'string' ? command : undefined;
 }
 
 function getEditPreview(args: unknown): string | undefined {
@@ -49,5 +73,18 @@ export function getToolResultText(result: RpcEvent['result']): string | undefine
 		.map((content) => content.text ?? '')
 		.join('\n')
 		.trim();
-	return text || undefined;
+	if (text) {
+		return text;
+	}
+
+	const details = result?.details;
+	if (!details) {
+		return undefined;
+	}
+	const detailText = ['output', 'stdout', 'stderr']
+		.map((key) => details[key])
+		.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+		.join('\n')
+		.trim();
+	return detailText || undefined;
 }

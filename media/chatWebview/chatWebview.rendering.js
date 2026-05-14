@@ -492,8 +492,13 @@ function upsertTool(message) {
 	const header = element.querySelector(".tool-header");
 	const body = element.querySelector(".tool-body");
 	const path = message.path ? " " + message.path : "";
-	header.textContent = (message.toolName ?? "tool") + path + formatToolStatus(message.status);
-	header.title = header.textContent;
+	const headerText = (message.toolName ?? "tool") + path + formatToolStatus(message.status);
+	header.textContent = "";
+	const toolName = document.createElement("span");
+	toolName.className = "tool-name";
+	toolName.textContent = message.toolName ?? "tool";
+	header.append(toolName, document.createTextNode(path + formatToolStatus(message.status)));
+	header.title = headerText;
 	renderToolBody(body, message.body ?? "", Boolean(message.isDiff), message.path);
 	body.hidden = !hasBody;
 	body.classList.toggle("diff", Boolean(message.isDiff));

@@ -11,7 +11,7 @@ import { buildPromptWithIdeContext, extractRestoredPrompt, getIdeContext } from 
 import { getBlockText, getBlockType, getEntryTimestamp, getMessageContent, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from './messageUtils';
 import { getPathSuggestions } from './pathAutocomplete';
 import { listSessions } from './sessionHistory';
-import { getToolBody, getToolPath, getToolResultText, isFileTool } from './toolUtils';
+import { getToolBody, getToolHeaderDetail, getToolResultText, isRenderableTool } from './toolUtils';
 import { formatUsageStatus } from './usageStatus';
 
 const execFileAsync = promisify(execFile);
@@ -319,7 +319,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		const toolCallId = typeof record.id === 'string' ? record.id : this.createId('restored-toolcall-id');
 		const name = typeof record.name === 'string' ? record.name : typeof record.toolName === 'string' ? record.toolName : undefined;
 		const args = record.arguments ?? record.args;
-		if (!isFileTool(name)) {
+		if (!isRenderableTool(name)) {
 			return;
 		}
 
@@ -329,7 +329,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id: elementId,
 			toolName: name,
-			path: getToolPath(args),
+			path: getToolHeaderDetail(name, args),
 			status: 'pending',
 			body: getToolBody(name, args),
 			isDiff: name === 'edit',
@@ -340,7 +340,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		const record = message as { toolCallId?: unknown; toolName?: unknown; isError?: unknown; details?: unknown };
 		const toolCall = typeof record.toolCallId === 'string' ? toolCalls.get(record.toolCallId) : undefined;
 		const name = typeof record.toolName === 'string' ? record.toolName : toolCall?.name;
-		if (!isFileTool(name)) {
+		if (!isRenderableTool(name)) {
 			return;
 		}
 
@@ -351,7 +351,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id: toolCall?.elementId ?? this.createId('restored-tool'),
 			toolName: name,
-			path: getToolPath(toolCall?.args),
+			path: getToolHeaderDetail(name, toolCall?.args),
 			status: isError ? 'error' : 'done',
 			body: name === 'read' && !isError ? undefined : diff ?? getToolResultText(message as RpcEvent['result']) ?? getToolBody(name, toolCall?.args),
 			isDiff: Boolean(diff),
@@ -599,7 +599,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private showToolExecutionStart(event: RpcEvent): void {
-		if (!isFileTool(event.toolName)) {
+		if (!isRenderableTool(event.toolName)) {
 			return;
 		}
 
@@ -609,14 +609,14 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id,
 			toolName: event.toolName,
-			path: getToolPath(args),
+			path: getToolHeaderDetail(event.toolName, args),
 			status: 'running',
 			body: getToolBody(event.toolName, args),
 		});
 	}
 
 	private showToolExecutionUpdate(event: RpcEvent): void {
-		if (!isFileTool(event.toolName) || event.toolName === 'read') {
+		if (!isRenderableTool(event.toolName) || event.toolName === 'read') {
 			return;
 		}
 
@@ -625,14 +625,14 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id: this.toolElementId(event.toolCallId),
 			toolName: event.toolName,
-			path: getToolPath(args),
+			path: getToolHeaderDetail(event.toolName, args),
 			status: 'running',
 			body: getToolResultText(event.partialResult),
 		});
 	}
 
 	private showToolExecutionEnd(event: RpcEvent): void {
-		if (!isFileTool(event.toolName)) {
+		if (!isRenderableTool(event.toolName)) {
 			return;
 		}
 
@@ -642,7 +642,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id: this.toolElementId(event.toolCallId),
 			toolName: event.toolName,
-			path: getToolPath(args),
+			path: getToolHeaderDetail(event.toolName, args),
 			status: event.isError ? 'error' : 'done',
 			body: event.toolName === 'read' ? undefined : diff ?? getToolResultText(event.result) ?? getToolBody(event.toolName, args),
 			isDiff: Boolean(diff),
@@ -672,7 +672,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		const toolCall = this.extractToolCall(event);
-		if (!isFileTool(toolCall.name)) {
+		if (!isRenderableTool(toolCall.name)) {
 			return;
 		}
 
@@ -690,7 +690,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id,
 			toolName: toolCall.name,
-			path: getToolPath(toolCall.args),
+			path: getToolHeaderDetail(toolCall.name, toolCall.args),
 			status: assistantEvent.type === 'toolcall_end' ? 'pending' : 'drafting',
 			body: getToolBody(toolCall.name, toolCall.args),
 			isDiff: toolCall.name === 'edit',
