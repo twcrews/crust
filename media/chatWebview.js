@@ -3,8 +3,10 @@ const sessionTitle = document.getElementById("session-title");
 const messages = document.getElementById("messages");
 const messagesContent = document.getElementById("messages-content");
 const emptyState = document.getElementById("empty-state");
+const emptyStateText = document.getElementById("empty-state-text");
 const form = document.getElementById("form");
 const prompt = document.getElementById("prompt");
+const slashAutocomplete = document.getElementById("slash-autocomplete");
 const ideContext = document.getElementById("ide-context");
 const ideContextLabel = document.getElementById("ide-context-label");
 const model = document.getElementById("model");
@@ -18,6 +20,70 @@ const jumpBottom = document.getElementById("jump-bottom");
 let ideContextEnabled = true;
 let currentIdeContextLabel = "";
 let currentTurn = null;
+let slashCommands = [];
+let slashSuggestions = [];
+let activeSlashSuggestionIndex = 0;
+let autocompleteMode = "";
+let pathAutocompleteRequestId = 0;
+let latestPathAutocompleteRequestId = 0;
+
+const emptyStateFlavorTexts = [
+	"Fun fact: this extension was almost named 'Circumference'!",
+	"Pi is irrational, but your conversations with it don't have to be.",
+	"There are many AI extensions, but this one is yours.",
+	"This extension was built with Pi. How meta!",
+	"It's called 'Crust'. Get it? Because the Pi is inside the Crust? No? Just me? Okay.",
+	"The creator of this extension has memorized Pi up to 35 digits. Can you beat that?",
+	"Pi is cooling on the windowsill, ready when you are.",
+	"Ask a question. Summon a diff. Pretend this was your plan all along.",
+	"Fresh chat, flaky crust, infinite filling potential.",
+	"No crumbs yet. Start typing and make a mess.",
+	"Pi has entered the chat. The chat has not yet entered Pi.",
+	"A blank canvas, but with more semicolons lurking nearby.",
+	"Tell Pi what broke. It promises not to say 'works on my machine.'",
+	"Start anywhere. Pi is unusually tolerant of vague requirements.",
+	"Your workspace has questions. Pi brought a fork.",
+	"Begin the ritual: prompt, wait, nod thoughtfully.",
+	"Vibe coding has never been so tasty.",
+	"New chat smell. Slight notes of code and optimism.",
+	"Pi is preheating. Add one prompt and stir.",
+	"Ask nicely, or ask in all caps. Pi has seen production logs.",
+	"Your next great commit starts with an unreasonable request.",
+	"Pi can explain the code. Understanding it is still a team sport.",
+	"Drop a prompt. Watch the crust rise.",
+	"A fresh slice of context is waiting.",
+	"The repo is quiet. Too quiet...",
+	"No messages yet. Enjoy this rare moment of quiet.",
+	"Pi accepts prompts, context, and the occasional existential crisis.",
+	"Pi is ready to go into the oven.",
+	"Every refactor begins with denial.",
+	"Crack open the crust and see what's baking.",
+	"Pi won't judge your branch name. Probably.",
+	"There are no bad questions, only bad dependency graphs.",
+	"Here lies an empty chat, full of unrealized bugs and side effects.",
+	"Ask Pi anything. Maybe not about floating point equality.",
+	"The best time to write tests was yesterday. The second best time is now.",
+	"A blank slate, a full repo, and absolutely no pressure.",
+	"Pi is listening. The linter is pretending not to.",
+	"Start a chat. Future you needs plausible deniability.",
+	"Pi is warmed up and ready to overthink edge cases.",
+	"Type boldly. Git remembers everything.",
+	"The crust is crisp. The context window is hungry.",
+	"Bring a task, a trace, or a mildly haunted function.",
+	"Pi has opinions. Some of them compile.",
+	"Nothing here yet except possibility and CSS.",
+	"Ask Pi to make it work, then make it pretty, then make it someone else's problem.",
+	"This is where the magic happens. Also the off-by-one errors.",
+	"Begin with a question. End with a suspiciously large diff.",
+	"Pi brought snacks for the dependency graph.",
+	"Your move, human.",
+	"Prompt first. Ask questions during code review.",
+	"Empty chat, full send.",
+	"This sentence is false. Hey, I didn't crash!",
+	"Pi is ready to build your abstract-prototype-singleton-proxy-adapter-factory pattern."
+];
+
+setRandomEmptyStateFlavorText();
 
 window.addEventListener("error", (event) => {
 	postWebviewLog("Webview error", {
@@ -40,20 +106,31 @@ form.addEventListener("submit", (event) => {
 	if (!text.trim()) {
 		return;
 	}
+	if (runSlashCommand(text)) {
+		return;
+	}
 	prompt.value = "";
 	autoResizePrompt();
+	updateSlashAutocomplete();
 	logWebview("Submitting prompt", { length: text.trim().length, includeIdeContext: ideContextEnabled && !ideContext.classList.contains("hidden") });
 	vscode.postMessage({ type: "submit", text, includeIdeContext: ideContextEnabled && !ideContext.classList.contains("hidden") });
 });
 
-prompt.addEventListener("input", autoResizePrompt);
-
-ideContext.addEventListener("click", () => {
-	ideContextEnabled = !ideContextEnabled;
-	updateIdeContextButtonState();
+prompt.addEventListener("input", () => {
+	autoResizePrompt();
+	updateSlashAutocomplete();
+});
+prompt.addEventListener("focus", updateSlashAutocomplete);
+prompt.addEventListener("blur", () => {
+	window.setTimeout(hideSlashAutocomplete, 100);
 });
 
+ideContext.addEventListener("click", toggleIdeContext);
+
 prompt.addEventListener("keydown", (event) => {
+	if (handleSlashAutocompleteKeydown(event)) {
+		return;
+	}
 	if (event.key === "Enter" && !event.shiftKey) {
 		event.preventDefault();
 		form.requestSubmit();
@@ -98,6 +175,15 @@ window.addEventListener("message", (event) => {
 	if (message.type === "models") {
 		setModels(message.models ?? [], message.selected);
 	}
+	if (message.type === "slashCommands") {
+		setSlashCommands(message.commands ?? []);
+	}
+	if (message.type === "focusModel") {
+		model.focus();
+	}
+	if (message.type === "pathAutocomplete") {
+		setPathSuggestions(message.requestId, message.suggestions ?? []);
+	}
 	if (message.type === "status") {
 		setStatus(message.message ?? "", false);
 	}
@@ -113,6 +199,7 @@ window.addEventListener("message", (event) => {
 	if (message.type === "clearMessages") {
 		messagesContent.textContent = "";
 		currentTurn = null;
+		setRandomEmptyStateFlavorText();
 		updateEmptyState();
 	}
 	if (message.type === "addMessage") {
@@ -713,6 +800,225 @@ function setIdeContext(label) {
 	updateIdeContextButtonState();
 }
 
+function toggleIdeContext() {
+	if (ideContext.classList.contains("hidden")) {
+		return;
+	}
+	ideContextEnabled = !ideContextEnabled;
+	updateIdeContextButtonState();
+}
+
+function setSlashCommands(commands) {
+	slashCommands = commands
+		.filter((command) => typeof command?.name === "string" && command.name.trim())
+		.map((command) => ({
+			name: command.name,
+			command: "/" + command.name,
+			description: command.description || formatSlashCommandSource(command),
+			source: command.source,
+		}));
+	updateSlashAutocomplete();
+}
+
+function formatSlashCommandSource(command) {
+	const parts = [command.source, command.location].filter((part) => typeof part === "string" && part);
+	return parts.join(" · ");
+}
+
+function runSlashCommand(text) {
+	const trimmed = text.trim();
+	if (!trimmed.startsWith("/")) {
+		return false;
+	}
+	const commandName = trimmed.slice(1).split(/\s+/, 1)[0];
+	const command = slashCommands.find((candidate) => candidate.name === commandName);
+	if (!command) {
+		setStatus("Unknown slash command: " + trimmed, true);
+		return true;
+	}
+	prompt.value = "";
+	autoResizePrompt();
+	hideSlashAutocomplete();
+	setStatus("", false);
+	logWebview("Running slash command", { command: command.command, source: command.source });
+	vscode.postMessage({ type: "slashCommand", commandName: command.name, commandText: trimmed });
+	return true;
+}
+
+function updateSlashAutocomplete() {
+	const value = prompt.value.trimStart();
+	if (value.startsWith("/") && !/\s/.test(value)) {
+		autocompleteMode = "slash";
+		slashSuggestions = slashCommands.filter((candidate) => candidate.command.startsWith(value));
+		if (!slashSuggestions.length) {
+			hideSlashAutocomplete();
+			return;
+		}
+		activeSlashSuggestionIndex = Math.min(activeSlashSuggestionIndex, slashSuggestions.length - 1);
+		renderSlashAutocomplete();
+		return;
+	}
+
+	const pathToken = getActivePathToken();
+	if (pathToken) {
+		autocompleteMode = "path";
+		latestPathAutocompleteRequestId = ++pathAutocompleteRequestId;
+		vscode.postMessage({ type: "pathAutocomplete", requestId: latestPathAutocompleteRequestId, query: pathToken.query });
+		return;
+	}
+
+	hideSlashAutocomplete();
+}
+
+function getActivePathToken() {
+	const cursor = prompt.selectionStart;
+	const beforeCursor = prompt.value.slice(0, cursor);
+	const match = beforeCursor.match(/(^|\s)@([^\s]*)$/);
+	if (!match) {
+		return undefined;
+	}
+	return { start: match.index + match[1].length, end: cursor, query: match[2] };
+}
+
+function setPathSuggestions(requestId, suggestions) {
+	if (requestId !== latestPathAutocompleteRequestId || autocompleteMode !== "path" || !getActivePathToken()) {
+		return;
+	}
+	slashSuggestions = suggestions.map((suggestion) => ({
+		command: "@" + suggestion.path,
+		description: "",
+		path: suggestion.path,
+		isDirectory: Boolean(suggestion.isDirectory),
+	}));
+	if (!slashSuggestions.length) {
+		hideSlashAutocomplete();
+		return;
+	}
+	activeSlashSuggestionIndex = Math.min(activeSlashSuggestionIndex, slashSuggestions.length - 1);
+	renderSlashAutocomplete();
+}
+
+function renderSlashAutocomplete() {
+	slashAutocomplete.textContent = "";
+	if (!slashSuggestions.length) {
+		hideSlashAutocomplete();
+		return;
+	}
+	for (const [index, suggestion] of slashSuggestions.entries()) {
+		const option = document.createElement("button");
+		option.type = "button";
+		option.className = "slash-autocomplete-option";
+		option.id = "slash-autocomplete-option-" + index;
+		option.setAttribute("role", "option");
+		option.setAttribute("aria-selected", String(index === activeSlashSuggestionIndex));
+		if (index === activeSlashSuggestionIndex) {
+			option.classList.add("active");
+			prompt.setAttribute("aria-activedescendant", option.id);
+		}
+		const command = document.createElement("span");
+		command.className = "slash-autocomplete-command";
+		command.textContent = suggestion.command;
+		option.append(command);
+		if (suggestion.description) {
+			const description = document.createElement("span");
+			description.className = "slash-autocomplete-description";
+			description.textContent = suggestion.description;
+			option.append(description);
+		}
+		option.addEventListener("mousedown", (event) => {
+			event.preventDefault();
+			selectSlashSuggestion(index);
+		});
+		slashAutocomplete.append(option);
+	}
+	slashAutocomplete.classList.remove("hidden");
+	scrollActiveSlashSuggestionIntoView();
+}
+
+function scrollActiveSlashSuggestionIntoView() {
+	const activeOption = slashAutocomplete.querySelector(".slash-autocomplete-option.active");
+	if (!activeOption) {
+		return;
+	}
+	const optionTop = activeOption.offsetTop;
+	const optionBottom = optionTop + activeOption.offsetHeight;
+	const visibleTop = slashAutocomplete.scrollTop;
+	const visibleBottom = visibleTop + slashAutocomplete.clientHeight;
+	if (optionTop < visibleTop) {
+		slashAutocomplete.scrollTop = optionTop;
+	}
+	if (optionBottom > visibleBottom) {
+		slashAutocomplete.scrollTop = optionBottom - slashAutocomplete.clientHeight;
+	}
+}
+
+function hideSlashAutocomplete() {
+	slashSuggestions = [];
+	activeSlashSuggestionIndex = 0;
+	autocompleteMode = "";
+	slashAutocomplete.classList.add("hidden");
+	slashAutocomplete.textContent = "";
+	prompt.removeAttribute("aria-activedescendant");
+}
+
+function handleSlashAutocompleteKeydown(event) {
+	if (slashAutocomplete.classList.contains("hidden")) {
+		return false;
+	}
+	if (event.key === "ArrowDown") {
+		event.preventDefault();
+		activeSlashSuggestionIndex = (activeSlashSuggestionIndex + 1) % slashSuggestions.length;
+		renderSlashAutocomplete();
+		return true;
+	}
+	if (event.key === "ArrowUp") {
+		event.preventDefault();
+		activeSlashSuggestionIndex = (activeSlashSuggestionIndex - 1 + slashSuggestions.length) % slashSuggestions.length;
+		renderSlashAutocomplete();
+		return true;
+	}
+	if (event.key === "Tab" || (autocompleteMode === "slash" && event.key === "Enter" && prompt.value.trim() !== slashSuggestions[activeSlashSuggestionIndex]?.command)) {
+		event.preventDefault();
+		selectSlashSuggestion(activeSlashSuggestionIndex);
+		return true;
+	}
+	if (event.key === "Escape") {
+		event.preventDefault();
+		hideSlashAutocomplete();
+		return true;
+	}
+	return false;
+}
+
+function selectSlashSuggestion(index) {
+	const suggestion = slashSuggestions[index];
+	if (!suggestion) {
+		return;
+	}
+	if (autocompleteMode === "path") {
+		const token = getActivePathToken();
+		if (!token) {
+			hideSlashAutocomplete();
+			return;
+		}
+		prompt.value = prompt.value.slice(0, token.start) + suggestion.command + prompt.value.slice(token.end);
+		const cursor = token.start + suggestion.command.length;
+		prompt.setSelectionRange(cursor, cursor);
+		autoResizePrompt();
+		if (suggestion.isDirectory) {
+			updateSlashAutocomplete();
+		} else {
+			hideSlashAutocomplete();
+		}
+		prompt.focus();
+		return;
+	}
+	prompt.value = suggestion.command;
+	autoResizePrompt();
+	hideSlashAutocomplete();
+	prompt.focus();
+}
+
 function updateIdeContextButtonState() {
 	ideContext.classList.toggle("disabled", !ideContextEnabled);
 	ideContext.setAttribute("aria-pressed", String(ideContextEnabled));
@@ -763,6 +1069,13 @@ function getMessageScrollTop(element) {
 
 function updateEmptyState() {
 	emptyState.classList.toggle("hidden", messagesContent.childElementCount > 0);
+}
+
+function setRandomEmptyStateFlavorText() {
+	if (!emptyStateText || emptyStateFlavorTexts.length === 0) {
+		return;
+	}
+	emptyStateText.textContent = emptyStateFlavorTexts[Math.floor(Math.random() * emptyStateFlavorTexts.length)];
 }
 
 function updateConversationNavButtons() {

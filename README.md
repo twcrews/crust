@@ -6,15 +6,21 @@ The goal of Crust is feature parity with existing similar extensions (like the [
 
 ## Features
 
-> [!NOTE]
-> Crust is a work in progress.
-
 | Feature | Progress |
 | ------- | -------- |
-| Session browser | In development |
-| IDE Context | In development |
-| Chat export | In development |
-| Diff viewer | In development |
+| Session browser | Complete |
+| IDE file/selection context | Complete |
+| Command autocomplete with `/` | Complete |
+| File autocomplete with `@` | Complete |
+| Rich markdown rendering | Complete |
+| Rich diff snippets | Complete |
+| Session forking | Planned |
+| Session tree browsing | Planned |
+| Login/logout | Planned |
+| Change reversion | Planned |
+| Settings UI | Planned |
+| Chat import/export | Planned |
+| Session sharing | Planned |
 
 ## Requirements
 

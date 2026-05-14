@@ -1,18 +1,22 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { existsSync, type Dirent } from 'node:fs';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
-import type { Model, RpcEvent } from '../pi/rpcTypes';
+import type { Model, RpcEvent, SlashCommand } from '../pi/rpcTypes';
 import { getChatWebviewHtml } from './chatWebview';
 
 type WebviewMessage = {
 	type?: string;
 	text?: string;
 	modelKey?: string;
+	commandName?: string;
+	commandText?: string;
+	requestId?: number;
+	query?: string;
 	message?: string;
 	details?: unknown;
 	includeIdeContext?: boolean;
@@ -62,6 +66,8 @@ export class CrustChatPanel implements vscode.Disposable {
 	private activeToolCallArgs = new Map<string, unknown>();
 	private activeTextMessageIds = new Map<number, string>();
 	private lastActiveTextEditor = vscode.window.activeTextEditor;
+	private piSlashCommands: SlashCommand[] = [];
+	private builtinSlashCommands: SlashCommand[] = [];
 
 	static show(context: vscode.ExtensionContext): void {
 		void CrustChatPanel.open(context);
@@ -130,16 +136,21 @@ export class CrustChatPanel implements vscode.Disposable {
 		try {
 			this.log('Initializing Pi RPC client');
 			await this.client.start();
-			const [models, state, messages] = await Promise.all([
+			const [models, state, messages, commands, builtinCommands] = await Promise.all([
 				this.client.getAvailableModels(),
 				this.client.getState(),
 				this.client.getMessages(),
+				this.client.getCommands(),
+				this.getBuiltinSlashCommands(),
 			]);
 			this.models = models;
+			this.piSlashCommands = commands;
+			this.builtinSlashCommands = builtinCommands;
 			const currentModel = (state as { model?: Model | null } | undefined)?.model;
 			this.contextWindow = this.getModelContextWindow(currentModel);
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
 			this.post({ type: 'models', models, selected: currentModel ? this.modelKey(currentModel) : undefined });
+			this.postSlashCommands();
 			await this.postSessionStatus(messages);
 			this.log('Initialized chat panel', { modelCount: models.length, messageCount: messages.length, contextWindow: this.contextWindow });
 		} catch (error) {
@@ -164,6 +175,12 @@ export class CrustChatPanel implements vscode.Disposable {
 			case 'newChat':
 				await this.newChat();
 				break;
+			case 'slashCommand':
+				await this.runSlashCommand(message.commandName ?? '', message.commandText ?? '');
+				break;
+			case 'pathAutocomplete':
+				await this.postPathAutocomplete(message.requestId, message.query ?? '');
+				break;
 			case 'webviewLog':
 				this.log(`Webview: ${message.message ?? ''}`, message.details);
 				break;
@@ -187,6 +204,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
 			await this.postSessionStatus([]);
 			this.postIdeContext();
+			void this.refreshSlashCommands();
 		} catch (error) {
 			this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
 		}
@@ -244,6 +262,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.hasSessionTitle = Boolean(firstUserMessage || session.name);
 		this.post({ type: 'sessionTitle', title: this.truncate(title, 50) });
 		await this.postSessionStatus(messages);
+		void this.refreshSlashCommands();
 	}
 
 	private resetConversationState(): void {
@@ -387,6 +406,195 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 		this.postUsageStatus(messages);
+	}
+
+	private async refreshSlashCommands(): Promise<void> {
+		try {
+			this.piSlashCommands = await this.client.getCommands();
+			this.postSlashCommands();
+		} catch (error) {
+			this.log('Failed to refresh slash commands', { error: error instanceof Error ? error.message : String(error) });
+		}
+	}
+
+	private postSlashCommands(): void {
+		const commands = [
+			...this.builtinSlashCommands,
+			...this.piSlashCommands,
+		];
+		this.post({ type: 'slashCommands', commands });
+	}
+
+	private async getBuiltinSlashCommands(): Promise<SlashCommand[]> {
+		try {
+			const { stdout } = await execFileAsync('which', ['pi']);
+			const piCliPath = await realpath(stdout.trim());
+			const source = await readFile(join(dirname(piCliPath), 'core', 'slash-commands.js'), 'utf8');
+			const commands: SlashCommand[] = [];
+			for (const match of source.matchAll(/\{\s*name:\s*"([^"]+)",\s*description:\s*(?:"([^"]*)"|`([^`]*)`)\s*\}/g)) {
+				commands.push({ name: match[1], description: (match[2] ?? match[3]).replace(/\$\{APP_NAME\}/g, 'Pi'), source: 'builtin' });
+			}
+			return commands.length ? commands : [{ name: 'new', description: 'Start a new session', source: 'builtin' }];
+		} catch (error) {
+			this.log('Failed to load Pi builtin slash commands', { error: error instanceof Error ? error.message : String(error) });
+			return [{ name: 'new', description: 'Start a new session', source: 'builtin' }];
+		}
+	}
+
+	private async runSlashCommand(commandName: string, commandText: string): Promise<void> {
+		if (this.piSlashCommands.some((command) => command.name === commandName)) {
+			await this.submitPrompt(commandText || `/${commandName}`, false);
+			void this.refreshSlashCommands();
+			return;
+		}
+
+		await this.runBuiltinSlashCommand(commandName, commandText);
+	}
+
+	private async postPathAutocomplete(requestId: number | undefined, query: string): Promise<void> {
+		if (typeof requestId !== 'number') {
+			return;
+		}
+		this.post({ type: 'pathAutocomplete', requestId, suggestions: await this.getPathSuggestions(query) });
+	}
+
+	private async getPathSuggestions(query: string): Promise<Array<{ path: string; name: string; isDirectory: boolean }>> {
+		if (!this.cwd) {
+			return [];
+		}
+
+		const normalizedQuery = query.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+		const gitSuggestions = await this.getGitPathSuggestions(normalizedQuery);
+		if (gitSuggestions) {
+			return gitSuggestions;
+		}
+
+		const suggestions: Array<{ path: string; name: string; isDirectory: boolean; score: number }> = [];
+		await this.collectPathSuggestions(this.cwd, '', normalizedQuery, suggestions);
+		return this.rankPathSuggestions(suggestions);
+	}
+
+	private async getGitPathSuggestions(query: string): Promise<Array<{ path: string; name: string; isDirectory: boolean }> | undefined> {
+		if (!this.cwd) {
+			return [];
+		}
+
+		try {
+			const { stdout } = await execFileAsync('git', ['-C', this.cwd, 'ls-files', '-co', '--exclude-standard']);
+			const suggestions = new Map<string, { path: string; name: string; isDirectory: boolean; score: number }>();
+			for (const filePath of stdout.split('\n').filter(Boolean)) {
+				this.addPathSuggestion(suggestions, filePath, false, query);
+				const parts = filePath.split('/');
+				for (let index = 1; index < parts.length; index++) {
+					this.addPathSuggestion(suggestions, `${parts.slice(0, index).join('/')}/`, true, query);
+				}
+			}
+			return this.rankPathSuggestions([...suggestions.values()]);
+		} catch {
+			return undefined;
+		}
+	}
+
+	private addPathSuggestion(
+		suggestions: Map<string, { path: string; name: string; isDirectory: boolean; score: number }>,
+		path: string,
+		isDirectory: boolean,
+		query: string,
+	): void {
+		const score = this.getPathSuggestionScore(path, query);
+		if (score === undefined) {
+			return;
+		}
+		const trimmedPath = path.endsWith('/') ? path.slice(0, -1) : path;
+		const name = basename(trimmedPath) || trimmedPath;
+		suggestions.set(path, { path, name, isDirectory, score });
+	}
+
+	private rankPathSuggestions(
+		suggestions: Array<{ path: string; name: string; isDirectory: boolean; score: number }>,
+	): Array<{ path: string; name: string; isDirectory: boolean }> {
+		return suggestions
+			.sort((a, b) => a.score - b.score || Number(b.isDirectory) - Number(a.isDirectory) || a.path.localeCompare(b.path))
+			.slice(0, 100)
+			.map(({ path, name, isDirectory }) => ({ path, name, isDirectory }));
+	}
+
+	private async collectPathSuggestions(
+		absoluteDirectory: string,
+		relativeDirectory: string,
+		query: string,
+		suggestions: Array<{ path: string; name: string; isDirectory: boolean; score: number }>,
+	): Promise<void> {
+		let entries: Dirent[];
+		try {
+			entries = await readdir(absoluteDirectory, { withFileTypes: true });
+		} catch {
+			return;
+		}
+
+		for (const entry of entries) {
+			if (!entry.isDirectory() && !entry.isFile()) {
+				continue;
+			}
+
+			const relativePath = join(relativeDirectory, entry.name).split(sep).join('/');
+			const displayPath = entry.isDirectory() ? `${relativePath}/` : relativePath;
+			const score = this.getPathSuggestionScore(displayPath, query);
+			if (score !== undefined) {
+				suggestions.push({ path: displayPath, name: entry.name, isDirectory: entry.isDirectory(), score });
+			}
+
+			if (entry.isDirectory()) {
+				await this.collectPathSuggestions(join(absoluteDirectory, entry.name), relativePath, query, suggestions);
+			}
+		}
+	}
+
+	private getPathSuggestionScore(path: string, query: string): number | undefined {
+		if (!query) {
+			return path.length;
+		}
+
+		const lowerPath = path.toLowerCase();
+		const substringIndex = lowerPath.indexOf(query);
+		if (substringIndex !== -1) {
+			return substringIndex * 10 + path.length / 1000;
+		}
+
+		let queryIndex = 0;
+		let score = 1000;
+		for (let pathIndex = 0; pathIndex < lowerPath.length && queryIndex < query.length; pathIndex++) {
+			if (lowerPath[pathIndex] === query[queryIndex]) {
+				score += pathIndex;
+				queryIndex++;
+			}
+		}
+		return queryIndex === query.length ? score + path.length / 1000 : undefined;
+	}
+
+	private async runBuiltinSlashCommand(commandName: string, commandText: string): Promise<void> {
+		const args = commandText.trim().slice(commandName.length + 1).trim();
+		switch (commandName) {
+			case 'new':
+				await this.newChat();
+				return;
+			case 'compact':
+				await this.client.compact(args || undefined);
+				await this.postSessionStatus(await this.client.getMessages());
+				return;
+			case 'name':
+				await this.client.setSessionName(args);
+				this.post({ type: 'sessionTitle', title: args || 'New Chat' });
+				return;
+			case 'resume':
+				await this.showHistory();
+				return;
+			case 'model':
+				this.post({ type: 'focusModel' });
+				return;
+			default:
+				this.post({ type: 'error', message: `/${commandName} is a Pi TUI command and is not available in Crust yet.` });
+		}
 	}
 
 	private async getWorkspaceStatus(): Promise<string> {

@@ -30,7 +30,7 @@
 		<main id="messages" class="messages" aria-live="polite">
 			<div id="empty-state" class="empty-state">
 				<img class="empty-state-icon" src="{{iconUri}}" alt="" aria-hidden="true">
-				<p class="empty-state-text">Ask Pi to inspect your workspace, explain code, or make a focused change.</p>
+				<p id="empty-state-text" class="empty-state-text">Ask Pi to inspect your workspace, explain code, or make a focused change.</p>
 			</div>
 			<div id="messages-content" class="messages-content"></div>
 		</main>
@@ -81,7 +81,8 @@
 						</svg>
 						<span id="ide-context-label"></span>
 					</button>
-					<textarea id="prompt" rows="1" placeholder="Ask Pi…"></textarea>
+					<div id="slash-autocomplete" class="slash-autocomplete hidden" role="listbox" aria-label="Slash commands"></div>
+					<textarea id="prompt" rows="1" placeholder="Ask Pi…" aria-autocomplete="list" aria-controls="slash-autocomplete"></textarea>
 				</div>
 				<button type="submit" aria-label="Submit prompt" title="Submit prompt">
 					<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">

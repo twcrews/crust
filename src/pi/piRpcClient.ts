@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import * as vscode from 'vscode';
-import { isRpcEvent, isRpcResponse, type Model, type RpcEvent, type RpcResponse } from './rpcTypes';
+import { isRpcEvent, isRpcResponse, type Model, type RpcEvent, type RpcResponse, type SlashCommand } from './rpcTypes';
 
 type PendingRequest = {
 	resolve: (response: RpcResponse) => void;
@@ -69,6 +69,12 @@ export class PiRpcClient implements vscode.Disposable {
 		return Array.isArray(data?.messages) ? data.messages : [];
 	}
 
+	async getCommands(): Promise<SlashCommand[]> {
+		const response = await this.send({ type: 'get_commands' });
+		const data = response.data as { commands?: unknown[] } | undefined;
+		return Array.isArray(data?.commands) ? data.commands.filter(isSlashCommand) : [];
+	}
+
 	async switchSession(sessionPath: string): Promise<boolean> {
 		const response = await this.send({ type: 'switch_session', sessionPath });
 		const data = response.data as { cancelled?: boolean } | undefined;
@@ -79,6 +85,14 @@ export class PiRpcClient implements vscode.Disposable {
 		const response = await this.send({ type: 'new_session' });
 		const data = response.data as { cancelled?: boolean } | undefined;
 		return !data?.cancelled;
+	}
+
+	async compact(customInstructions?: string): Promise<void> {
+		await this.send({ type: 'compact', ...(customInstructions ? { customInstructions } : {}) });
+	}
+
+	async setSessionName(name: string): Promise<void> {
+		await this.send({ type: 'set_session_name', name });
 	}
 
 	async setModel(model: Model): Promise<void> {
@@ -184,4 +198,14 @@ export class PiRpcClient implements vscode.Disposable {
 		}
 		this.pending.clear();
 	}
+}
+
+function isSlashCommand(value: unknown): value is SlashCommand {
+	return typeof value === 'object'
+		&& value !== null
+		&& typeof (value as { name?: unknown }).name === 'string'
+		&& ((value as { description?: unknown }).description === undefined || typeof (value as { description?: unknown }).description === 'string')
+		&& ((value as { source?: unknown }).source === undefined || typeof (value as { source?: unknown }).source === 'string')
+		&& ((value as { location?: unknown }).location === undefined || typeof (value as { location?: unknown }).location === 'string')
+		&& ((value as { path?: unknown }).path === undefined || typeof (value as { path?: unknown }).path === 'string');
 }

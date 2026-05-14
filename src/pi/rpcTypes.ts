@@ -37,6 +37,14 @@ export type Model = {
 	provider: string;
 };
 
+export type SlashCommand = {
+	name: string;
+	description?: string;
+	source?: string;
+	location?: string;
+	path?: string;
+};
+
 export function isRpcResponse(message: unknown): message is RpcResponse {
 	return typeof message === 'object'
 		&& message !== null
