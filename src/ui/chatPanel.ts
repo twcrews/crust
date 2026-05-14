@@ -1,52 +1,18 @@
 import { execFile } from 'node:child_process';
-import { existsSync, type Dirent } from 'node:fs';
-import { readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { basename, dirname, join, sep } from 'node:path';
+import { readFile, realpath } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
 import type { Model, RpcEvent, SlashCommand } from '../pi/rpcTypes';
+import type { SessionInfo, WebviewMessage } from './chatTypes';
 import { getChatWebviewHtml } from './chatWebview';
-
-type WebviewMessage = {
-	type?: string;
-	text?: string;
-	modelKey?: string;
-	commandName?: string;
-	commandText?: string;
-	requestId?: number;
-	query?: string;
-	message?: string;
-	details?: unknown;
-	includeIdeContext?: boolean;
-};
-
-type IdeContext = {
-	label: string;
-	filePath: string;
-	languageId: string;
-	selectionRange?: string;
-	selectedText?: string;
-};
-
-type SessionInfo = {
-	path: string;
-	name?: string;
-	firstMessage: string;
-	modified: Date;
-	messageCount: number;
-};
-
-type UsageStats = {
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	totalTokens: number;
-	contextTokens: number;
-	cost: number;
-};
+import { buildPromptWithIdeContext, extractRestoredPrompt, getIdeContext } from './ideContext';
+import { getBlockText, getBlockType, getEntryTimestamp, getMessageContent, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from './messageUtils';
+import { getPathSuggestions } from './pathAutocomplete';
+import { listSessions } from './sessionHistory';
+import { getToolBody, getToolPath, getToolResultText, isFileTool } from './toolUtils';
+import { formatUsageStatus } from './usageStatus';
 
 const execFileAsync = promisify(execFile);
 
@@ -213,7 +179,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	private async showHistory(): Promise<void> {
 		try {
 			this.log('Loading session history');
-			const sessions = await this.listSessions();
+			const sessions = await listSessions(this.client, this.cwd);
 			if (!sessions.length) {
 				void vscode.window.showInformationMessage('No previous Pi sessions found.');
 				return;
@@ -258,7 +224,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			firstUserMessage ??= restoredFirstUserMessage;
 		}
 
-		const title = session.name ? this.extractRestoredPrompt(session.name).text : firstUserMessage || 'New Chat';
+		const title = session.name ? extractRestoredPrompt(session.name).text : firstUserMessage || 'New Chat';
 		this.hasSessionTitle = Boolean(firstUserMessage || session.name);
 		this.post({ type: 'sessionTitle', title: this.truncate(title, 50) });
 		await this.postSessionStatus(messages);
@@ -279,9 +245,9 @@ export class CrustChatPanel implements vscode.Disposable {
 		message: unknown,
 		toolCalls: Map<string, { elementId: string; name?: string; args?: unknown }>,
 	): string | undefined {
-		const role = this.getMessageRole(message);
+		const role = getMessageRole(message);
 		if (role === 'user') {
-			const restoredPrompt = this.extractRestoredPrompt(this.getMessageText(message).trim());
+			const restoredPrompt = extractRestoredPrompt(getMessageText(message).trim());
 			if (restoredPrompt.text) {
 				this.post({
 					type: 'addMessage',
@@ -305,7 +271,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			return undefined;
 		}
 
-		const text = this.getMessageText(message).trim();
+		const text = getMessageText(message).trim();
 		if (text) {
 			this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text });
 		}
@@ -316,7 +282,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		message: unknown,
 		toolCalls: Map<string, { elementId: string; name?: string; args?: unknown }>,
 	): void {
-		const content = this.getMessageContent(message);
+		const content = getMessageContent(message);
 		if (typeof content === 'string') {
 			this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text: content });
 			return;
@@ -327,15 +293,15 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		for (const block of content) {
-			const type = this.getBlockType(block);
+			const type = getBlockType(block);
 			if (type === 'text') {
-				const text = this.getBlockText(block, 'text').trim();
+				const text = getBlockText(block, 'text').trim();
 				if (text) {
 					this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text });
 				}
 			}
 			if (type === 'thinking') {
-				const thinking = this.getBlockText(block, 'thinking');
+				const thinking = getBlockText(block, 'thinking');
 				if (thinking.trim()) {
 					const id = this.createId('thinking');
 					this.post({ type: 'addThinking', id });
@@ -353,7 +319,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		const toolCallId = typeof record.id === 'string' ? record.id : this.createId('restored-toolcall-id');
 		const name = typeof record.name === 'string' ? record.name : typeof record.toolName === 'string' ? record.toolName : undefined;
 		const args = record.arguments ?? record.args;
-		if (!this.isFileTool(name)) {
+		if (!isFileTool(name)) {
 			return;
 		}
 
@@ -363,9 +329,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id: elementId,
 			toolName: name,
-			path: this.getToolPath(args),
+			path: getToolPath(args),
 			status: 'pending',
-			body: this.getToolBody(name, args),
+			body: getToolBody(name, args),
 			isDiff: name === 'edit',
 		});
 	}
@@ -374,7 +340,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		const record = message as { toolCallId?: unknown; toolName?: unknown; isError?: unknown; details?: unknown };
 		const toolCall = typeof record.toolCallId === 'string' ? toolCalls.get(record.toolCallId) : undefined;
 		const name = typeof record.toolName === 'string' ? record.toolName : toolCall?.name;
-		if (!this.isFileTool(name)) {
+		if (!isFileTool(name)) {
 			return;
 		}
 
@@ -385,9 +351,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id: toolCall?.elementId ?? this.createId('restored-tool'),
 			toolName: name,
-			path: this.getToolPath(toolCall?.args),
+			path: getToolPath(toolCall?.args),
 			status: isError ? 'error' : 'done',
-			body: name === 'read' && !isError ? undefined : diff ?? this.getToolResultText(message as RpcEvent['result']) ?? this.getToolBody(name, toolCall?.args),
+			body: name === 'read' && !isError ? undefined : diff ?? getToolResultText(message as RpcEvent['result']) ?? getToolBody(name, toolCall?.args),
 			isDiff: Boolean(diff),
 		});
 	}
@@ -455,121 +421,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		if (typeof requestId !== 'number') {
 			return;
 		}
-		this.post({ type: 'pathAutocomplete', requestId, suggestions: await this.getPathSuggestions(query) });
-	}
-
-	private async getPathSuggestions(query: string): Promise<Array<{ path: string; name: string; isDirectory: boolean }>> {
-		if (!this.cwd) {
-			return [];
-		}
-
-		const normalizedQuery = query.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
-		const gitSuggestions = await this.getGitPathSuggestions(normalizedQuery);
-		if (gitSuggestions) {
-			return gitSuggestions;
-		}
-
-		const suggestions: Array<{ path: string; name: string; isDirectory: boolean; score: number }> = [];
-		await this.collectPathSuggestions(this.cwd, '', normalizedQuery, suggestions);
-		return this.rankPathSuggestions(suggestions);
-	}
-
-	private async getGitPathSuggestions(query: string): Promise<Array<{ path: string; name: string; isDirectory: boolean }> | undefined> {
-		if (!this.cwd) {
-			return [];
-		}
-
-		try {
-			const { stdout } = await execFileAsync('git', ['-C', this.cwd, 'ls-files', '-co', '--exclude-standard']);
-			const suggestions = new Map<string, { path: string; name: string; isDirectory: boolean; score: number }>();
-			for (const filePath of stdout.split('\n').filter(Boolean)) {
-				this.addPathSuggestion(suggestions, filePath, false, query);
-				const parts = filePath.split('/');
-				for (let index = 1; index < parts.length; index++) {
-					this.addPathSuggestion(suggestions, `${parts.slice(0, index).join('/')}/`, true, query);
-				}
-			}
-			return this.rankPathSuggestions([...suggestions.values()]);
-		} catch {
-			return undefined;
-		}
-	}
-
-	private addPathSuggestion(
-		suggestions: Map<string, { path: string; name: string; isDirectory: boolean; score: number }>,
-		path: string,
-		isDirectory: boolean,
-		query: string,
-	): void {
-		const score = this.getPathSuggestionScore(path, query);
-		if (score === undefined) {
-			return;
-		}
-		const trimmedPath = path.endsWith('/') ? path.slice(0, -1) : path;
-		const name = basename(trimmedPath) || trimmedPath;
-		suggestions.set(path, { path, name, isDirectory, score });
-	}
-
-	private rankPathSuggestions(
-		suggestions: Array<{ path: string; name: string; isDirectory: boolean; score: number }>,
-	): Array<{ path: string; name: string; isDirectory: boolean }> {
-		return suggestions
-			.sort((a, b) => a.score - b.score || Number(b.isDirectory) - Number(a.isDirectory) || a.path.localeCompare(b.path))
-			.slice(0, 100)
-			.map(({ path, name, isDirectory }) => ({ path, name, isDirectory }));
-	}
-
-	private async collectPathSuggestions(
-		absoluteDirectory: string,
-		relativeDirectory: string,
-		query: string,
-		suggestions: Array<{ path: string; name: string; isDirectory: boolean; score: number }>,
-	): Promise<void> {
-		let entries: Dirent[];
-		try {
-			entries = await readdir(absoluteDirectory, { withFileTypes: true });
-		} catch {
-			return;
-		}
-
-		for (const entry of entries) {
-			if (!entry.isDirectory() && !entry.isFile()) {
-				continue;
-			}
-
-			const relativePath = join(relativeDirectory, entry.name).split(sep).join('/');
-			const displayPath = entry.isDirectory() ? `${relativePath}/` : relativePath;
-			const score = this.getPathSuggestionScore(displayPath, query);
-			if (score !== undefined) {
-				suggestions.push({ path: displayPath, name: entry.name, isDirectory: entry.isDirectory(), score });
-			}
-
-			if (entry.isDirectory()) {
-				await this.collectPathSuggestions(join(absoluteDirectory, entry.name), relativePath, query, suggestions);
-			}
-		}
-	}
-
-	private getPathSuggestionScore(path: string, query: string): number | undefined {
-		if (!query) {
-			return path.length;
-		}
-
-		const lowerPath = path.toLowerCase();
-		const substringIndex = lowerPath.indexOf(query);
-		if (substringIndex !== -1) {
-			return substringIndex * 10 + path.length / 1000;
-		}
-
-		let queryIndex = 0;
-		let score = 1000;
-		for (let pathIndex = 0; pathIndex < lowerPath.length && queryIndex < query.length; pathIndex++) {
-			if (lowerPath[pathIndex] === query[queryIndex]) {
-				score += pathIndex;
-				queryIndex++;
-			}
-		}
-		return queryIndex === query.length ? score + path.length / 1000 : undefined;
+		this.post({ type: 'pathAutocomplete', requestId, suggestions: await getPathSuggestions(this.cwd, query) });
 	}
 
 	private async runBuiltinSlashCommand(commandName: string, commandText: string): Promise<void> {
@@ -619,181 +471,18 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private postUsageStatus(messages: unknown[]): void {
-		this.post({ type: 'status', message: this.formatUsageStats(this.getUsageStats(messages)) });
-	}
-
-	private getUsageStats(messages: unknown[]): UsageStats {
-		const stats: UsageStats = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, contextTokens: 0, cost: 0 };
-		for (const message of messages) {
-			const usage = this.getMessageUsage(message);
-			if (!usage) {
-				continue;
-			}
-			stats.input += this.getNumber(usage.input);
-			stats.output += this.getNumber(usage.output);
-			stats.cacheRead += this.getNumber(usage.cacheRead);
-			stats.cacheWrite += this.getNumber(usage.cacheWrite);
-			stats.contextTokens = this.getNumber(usage.totalTokens) || stats.contextTokens;
-			stats.totalTokens += this.getNumber(usage.totalTokens);
-			const cost = typeof usage.cost === 'object' && usage.cost !== null ? usage.cost as Record<string, unknown> : undefined;
-			stats.cost += this.getNumber(cost?.total);
-		}
-		if (!stats.totalTokens) {
-			stats.totalTokens = stats.input + stats.output + stats.cacheRead + stats.cacheWrite;
-		}
-		return stats;
-	}
-
-	private getMessageUsage(message: unknown): Record<string, unknown> | undefined {
-		if (typeof message !== 'object' || message === null) {
-			return undefined;
-		}
-		const record = message as { usage?: unknown; message?: unknown };
-		const candidate = record.usage ?? (typeof record.message === 'object' && record.message !== null ? (record.message as { usage?: unknown }).usage : undefined);
-		return typeof candidate === 'object' && candidate !== null ? candidate as Record<string, unknown> : undefined;
-	}
-
-	private formatUsageStats(stats: UsageStats): string {
-		const parts = [
-			`${this.formatTokenCount(stats.totalTokens)}`,
-			`${this.formatTokenCount(stats.input)} in`,
-			`${this.formatTokenCount(stats.output)} out`,
-		];
-		if (this.contextWindow) {
-			parts.push(this.formatContextUsage(stats.contextTokens, this.contextWindow));
-		}
-		parts.push(this.formatCost(stats.cost));
-		return `${parts.join(' · ')}`;
-	}
-
-	private formatContextUsage(usedTokens: number, availableTokens: number): string {
-		const percent = availableTokens > 0 ? (usedTokens / availableTokens) * 100 : 0;
-		return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(percent)}%/${this.formatTokenCount(availableTokens)}`;
-	}
-
-	private formatTokenCount(value: number): string {
-		const absolute = Math.abs(value);
-		const units = [
-			{ suffix: 'T', value: 1_000_000_000_000 },
-			{ suffix: 'B', value: 1_000_000_000 },
-			{ suffix: 'M', value: 1_000_000 },
-			{ suffix: 'k', value: 1_000 },
-		];
-		const unit = units.find((candidate) => absolute >= candidate.value);
-		if (!unit) {
-			return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.round(value));
-		}
-
-		const scaled = value / unit.value;
-		const maxFractionDigits = Math.max(0, 2 - Math.floor(Math.log10(Math.abs(scaled))) - 1);
-		return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: maxFractionDigits }).format(scaled)}${unit.suffix}`;
-	}
-
-	private formatCost(value: number): string {
-		return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
-	}
-
-	private getNumber(value: unknown): number {
-		return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-	}
-
-	private getMessageContent(message: unknown): unknown {
-		return typeof message === 'object' && message !== null ? (message as { content?: unknown }).content : undefined;
-	}
-
-	private getBlockType(block: unknown): string | undefined {
-		return typeof block === 'object' && block !== null && typeof (block as { type?: unknown }).type === 'string'
-			? (block as { type: string }).type
-			: undefined;
-	}
-
-	private getBlockText(block: unknown, key: 'text' | 'thinking'): string {
-		return typeof block === 'object' && block !== null && typeof (block as Record<string, unknown>)[key] === 'string'
-			? (block as Record<string, string>)[key]
-			: '';
+		this.post({ type: 'status', message: formatUsageStatus(messages, this.contextWindow) });
 	}
 
 	private postIdeContext(): void {
-		const ideContext = this.getIdeContext();
+		const ideContext = getIdeContext(this.lastActiveTextEditor);
 		this.post({ type: 'ideContext', label: ideContext?.label });
-	}
-
-	private getIdeContext(): IdeContext | undefined {
-		const editor = this.lastActiveTextEditor;
-		if (!editor) {
-			return undefined;
-		}
-
-		const uri = editor.document.uri;
-		if (uri.scheme !== 'file' && uri.scheme !== 'untitled') {
-			return undefined;
-		}
-
-		const filePath = uri.scheme === 'file'
-			? vscode.workspace.asRelativePath(uri, false)
-			: editor.document.fileName;
-		const fileName = basename(filePath) || filePath;
-		const selection = editor.selection;
-		if (selection && !selection.isEmpty) {
-			const selectionRange = this.formatSelectionRange(selection);
-			return {
-				label: `${fileName}:${selectionRange}`,
-				filePath,
-				languageId: editor.document.languageId,
-				selectionRange,
-				selectedText: editor.document.getText(selection),
-			};
-		}
-
-		return { label: fileName, filePath, languageId: editor.document.languageId };
-	}
-
-	private formatSelectionRange(selection: vscode.Selection): string {
-		const startLine = selection.start.line + 1;
-		const endLine = selection.end.character === 0 && selection.end.line > selection.start.line
-			? selection.end.line
-			: selection.end.line + 1;
-		return startLine === endLine ? String(startLine) : `${startLine}-${endLine}`;
-	}
-
-	private buildPromptWithIdeContext(prompt: string, ideContext: IdeContext): string {
-		const lines = [
-			'<ide_context>',
-			`Current file: ${ideContext.filePath}`,
-		];
-		if (ideContext.selectionRange && ideContext.selectedText !== undefined) {
-			lines.push(
-				`Selected lines: ${ideContext.selectionRange}`,
-				'Selected text:',
-				`\`\`\`${ideContext.languageId}`,
-				ideContext.selectedText,
-				'```',
-			);
-		}
-		lines.push('</ide_context>', '', prompt);
-		return lines.join('\n');
-	}
-
-	private extractRestoredPrompt(text: string): { text: string; ideContextLabel?: string } {
-		const match = text.match(/^<ide_context>\n([\s\S]*?)\n<\/ide_context>\n*/);
-		if (!match) {
-			return { text };
-		}
-
-		const contextText = match[1];
-		const filePath = contextText.match(/^Current file: (.+)$/m)?.[1]?.trim();
-		const selectedLines = contextText.match(/^Selected lines: (.+)$/m)?.[1]?.trim();
-		const fileName = filePath ? basename(filePath) : undefined;
-		return {
-			text: text.slice(match[0].length).trimStart(),
-			ideContextLabel: fileName ? `${fileName}${selectedLines ? `:${selectedLines}` : ''}` : undefined,
-		};
 	}
 
 	private async submitPrompt(text: string, includeIdeContext: boolean): Promise<void> {
 		const trimmed = text.trim();
-		const ideContext = includeIdeContext ? this.getIdeContext() : undefined;
-		const promptText = ideContext ? this.buildPromptWithIdeContext(trimmed, ideContext) : trimmed;
+		const ideContext = includeIdeContext ? getIdeContext(this.lastActiveTextEditor) : undefined;
+		const promptText = ideContext ? buildPromptWithIdeContext(trimmed, ideContext) : trimmed;
 		this.log('Submitting prompt', { length: trimmed.length, promptLength: promptText.length, followUp: this.isStreaming, ideContext: ideContext?.label });
 		if (!trimmed) {
 			return;
@@ -910,7 +599,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private showToolExecutionStart(event: RpcEvent): void {
-		if (!this.isFileTool(event.toolName)) {
+		if (!isFileTool(event.toolName)) {
 			return;
 		}
 
@@ -920,14 +609,14 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id,
 			toolName: event.toolName,
-			path: this.getToolPath(args),
+			path: getToolPath(args),
 			status: 'running',
-			body: this.getToolBody(event.toolName, args),
+			body: getToolBody(event.toolName, args),
 		});
 	}
 
 	private showToolExecutionUpdate(event: RpcEvent): void {
-		if (!this.isFileTool(event.toolName) || event.toolName === 'read') {
+		if (!isFileTool(event.toolName) || event.toolName === 'read') {
 			return;
 		}
 
@@ -936,14 +625,14 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id: this.toolElementId(event.toolCallId),
 			toolName: event.toolName,
-			path: this.getToolPath(args),
+			path: getToolPath(args),
 			status: 'running',
-			body: this.getToolResultText(event.partialResult),
+			body: getToolResultText(event.partialResult),
 		});
 	}
 
 	private showToolExecutionEnd(event: RpcEvent): void {
-		if (!this.isFileTool(event.toolName)) {
+		if (!isFileTool(event.toolName)) {
 			return;
 		}
 
@@ -953,9 +642,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id: this.toolElementId(event.toolCallId),
 			toolName: event.toolName,
-			path: this.getToolPath(args),
+			path: getToolPath(args),
 			status: event.isError ? 'error' : 'done',
-			body: event.toolName === 'read' ? undefined : diff ?? this.getToolResultText(event.result) ?? this.getToolBody(event.toolName, args),
+			body: event.toolName === 'read' ? undefined : diff ?? getToolResultText(event.result) ?? getToolBody(event.toolName, args),
 			isDiff: Boolean(diff),
 		});
 	}
@@ -983,7 +672,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		const toolCall = this.extractToolCall(event);
-		if (!this.isFileTool(toolCall.name)) {
+		if (!isFileTool(toolCall.name)) {
 			return;
 		}
 
@@ -1001,9 +690,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			type: 'upsertTool',
 			id,
 			toolName: toolCall.name,
-			path: this.getToolPath(toolCall.args),
+			path: getToolPath(toolCall.args),
 			status: assistantEvent.type === 'toolcall_end' ? 'pending' : 'drafting',
-			body: this.getToolBody(toolCall.name, toolCall.args),
+			body: getToolBody(toolCall.name, toolCall.args),
 			isDiff: toolCall.name === 'edit',
 		});
 	}
@@ -1032,183 +721,8 @@ export class CrustChatPanel implements vscode.Disposable {
 		return Array.isArray(content) ? content[contentIndex] : undefined;
 	}
 
-	private isFileTool(toolName: string | undefined): boolean {
-		return toolName === 'read' || toolName === 'write' || toolName === 'edit';
-	}
-
-	private getToolPath(args: unknown): string | undefined {
-		if (typeof args !== 'object' || args === null) {
-			return undefined;
-		}
-		const path = (args as { path?: unknown; file_path?: unknown }).path ?? (args as { file_path?: unknown }).file_path;
-		return typeof path === 'string' ? path : undefined;
-	}
-
-	private getToolBody(toolName: string | undefined, args: unknown): string | undefined {
-		if (typeof args !== 'object' || args === null || toolName === 'read') {
-			return undefined;
-		}
-
-		if (toolName === 'write') {
-			const content = (args as { content?: unknown }).content;
-			return typeof content === 'string' ? content : undefined;
-		}
-
-		if (toolName === 'edit') {
-			return this.getEditPreview(args);
-		}
-
-		return undefined;
-	}
-
-	private getEditPreview(args: unknown): string | undefined {
-		const edits = (args as { edits?: unknown }).edits;
-		if (!Array.isArray(edits)) {
-			return undefined;
-		}
-		return edits
-			.map((edit, index) => {
-				const oldText = typeof (edit as { oldText?: unknown }).oldText === 'string' ? (edit as { oldText: string }).oldText : '';
-				const newText = typeof (edit as { newText?: unknown }).newText === 'string' ? (edit as { newText: string }).newText : '';
-				return [`@@ edit ${index + 1} @@`, ...oldText.split('\n').map((line) => `-${line}`), ...newText.split('\n').map((line) => `+${line}`)].join('\n');
-			})
-			.join('\n');
-	}
-
-	private getToolResultText(result: RpcEvent['result']): string | undefined {
-		const text = result?.content
-			?.filter((content) => content.type === 'text')
-			.map((content) => content.text ?? '')
-			.join('\n')
-			.trim();
-		return text || undefined;
-	}
-
 	private toolElementId(toolCallId: string | undefined): string {
 		return `tool-${toolCallId ?? this.createId('unknown')}`;
-	}
-
-	private async listSessions(): Promise<SessionInfo[]> {
-		const sessionDir = await this.getSessionDir();
-		if (!sessionDir || !existsSync(sessionDir)) {
-			return [];
-		}
-
-		const entries = await readdir(sessionDir);
-		const sessions = await Promise.all(
-			entries
-				.filter((entry) => entry.endsWith('.jsonl'))
-				.map((entry) => this.readSessionInfo(join(sessionDir, entry))),
-		);
-		return sessions
-			.filter((session): session is SessionInfo => Boolean(session))
-			.sort((a, b) => b.modified.getTime() - a.modified.getTime());
-	}
-
-	private async getSessionDir(): Promise<string | undefined> {
-		const state = await this.client.getState();
-		const sessionFile = typeof (state as { sessionFile?: unknown } | undefined)?.sessionFile === 'string'
-			? (state as { sessionFile: string }).sessionFile
-			: undefined;
-		if (sessionFile) {
-			return dirname(sessionFile);
-		}
-		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-		if (!cwd) {
-			return undefined;
-		}
-		const root = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions');
-		return join(root, `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`);
-	}
-
-	private async readSessionInfo(path: string): Promise<SessionInfo | undefined> {
-		try {
-			const [content, stats] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
-			const entries = content
-				.trim()
-				.split('\n')
-				.map((line) => this.parseJsonObject(line))
-				.filter((entry): entry is Record<string, unknown> => Boolean(entry));
-			const header = entries[0];
-			if (header?.type !== 'session') {
-				return undefined;
-			}
-
-			let name: string | undefined;
-			let firstMessage = '(no messages)';
-			let messageCount = 0;
-			let modified = stats.mtime;
-			for (const entry of entries) {
-				if (entry.type === 'session_info') {
-					name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : undefined;
-				}
-				if (entry.type !== 'message') {
-					continue;
-				}
-				messageCount++;
-				const message = entry.message;
-				const role = this.getMessageRole(message);
-				const text = this.getMessageText(message).trim();
-				if (role === 'user' && firstMessage === '(no messages)' && text) {
-					firstMessage = this.extractRestoredPrompt(text).text;
-				}
-				const timestamp = this.getMessageTimestamp(message) ?? this.getEntryTimestamp(entry);
-				if (timestamp && timestamp > modified.getTime()) {
-					modified = new Date(timestamp);
-				}
-			}
-
-			return { path, name, firstMessage, modified, messageCount };
-		} catch {
-			return undefined;
-		}
-	}
-
-	private parseJsonObject(line: string): Record<string, unknown> | undefined {
-		try {
-			const parsed = JSON.parse(line) as unknown;
-			return typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : undefined;
-		} catch {
-			return undefined;
-		}
-	}
-
-	private getMessageRole(message: unknown): 'user' | 'assistant' | string | undefined {
-		return typeof message === 'object' && message !== null && typeof (message as { role?: unknown }).role === 'string'
-			? (message as { role: string }).role
-			: undefined;
-	}
-
-	private getMessageText(message: unknown): string {
-		if (typeof message !== 'object' || message === null) {
-			return '';
-		}
-		const content = (message as { content?: unknown }).content;
-		if (typeof content === 'string') {
-			return content;
-		}
-		if (!Array.isArray(content)) {
-			return '';
-		}
-		return content
-			.filter((block) => typeof block === 'object' && block !== null && (block as { type?: unknown }).type === 'text')
-			.map((block) => typeof (block as { text?: unknown }).text === 'string' ? (block as { text: string }).text : '')
-			.join('\n');
-	}
-
-	private getMessageTimestamp(message: unknown): number | undefined {
-		if (typeof message !== 'object' || message === null || typeof (message as { timestamp?: unknown }).timestamp !== 'number') {
-			return undefined;
-		}
-		return (message as { timestamp: number }).timestamp;
-	}
-
-	private getEntryTimestamp(entry: Record<string, unknown>): number | undefined {
-		if (typeof entry.timestamp !== 'string') {
-			return undefined;
-		}
-		const timestamp = new Date(entry.timestamp).getTime();
-		return Number.isNaN(timestamp) ? undefined : timestamp;
 	}
 
 	private formatSessionDate(date: Date): string {
