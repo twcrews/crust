@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}}; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
 	<link rel="stylesheet" href="{{styleUri}}">
 	<title>Crust Chat</title>
 </head>
@@ -20,7 +20,13 @@
 				<span>History</span>
 			</button>
 		</header>
-		<main id="messages" class="messages" aria-live="polite"></main>
+		<main id="messages" class="messages" aria-live="polite">
+			<div id="empty-state" class="empty-state">
+				<img class="empty-state-icon" src="{{iconUri}}" alt="" aria-hidden="true">
+				<p class="empty-state-text">Ask Pi to inspect your workspace, explain code, or make a focused change.</p>
+			</div>
+			<div id="messages-content" class="messages-content"></div>
+		</main>
 		<nav class="conversation-nav" aria-label="Conversation navigation">
 			<span class="conversation-nav-item" data-tooltip="Jump to top">
 				<button id="jump-top" class="conversation-nav-button" type="button" aria-label="Jump to top">

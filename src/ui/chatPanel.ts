@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
 import type { Model, RpcEvent } from '../pi/rpcTypes';
@@ -21,16 +23,31 @@ type SessionInfo = {
 	messageCount: number;
 };
 
+type UsageStats = {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	totalTokens: number;
+	contextTokens: number;
+	cost: number;
+};
+
+const execFileAsync = promisify(execFile);
+
 export class CrustChatPanel implements vscode.Disposable {
 	private static currentPanel: CrustChatPanel | undefined;
 	private readonly disposables: vscode.Disposable[] = [];
+	private readonly cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 	private readonly client: PiRpcClient;
 	private models: Model[] = [];
+	private contextWindow: number | undefined;
 	private isStreaming = false;
-	private activeAssistantMessageId: string | undefined;
 	private activeThinkingMessageId: string | undefined;
+	private activeLoadingMessageId: string | undefined;
 	private hasSessionTitle = false;
 	private activeToolCallIds = new Map<number, string>();
+	private activeTextMessageIds = new Map<number, string>();
 
 	static show(context: vscode.ExtensionContext): void {
 		void CrustChatPanel.open(context);
@@ -58,8 +75,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		private readonly context: vscode.ExtensionContext,
 		private readonly panel: vscode.WebviewPanel,
 	) {
-		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-		this.client = new PiRpcClient(cwd);
+		this.client = new PiRpcClient(this.cwd);
 		this.panel.iconPath = this.getIconPath();
 		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview);
 
@@ -84,15 +100,17 @@ export class CrustChatPanel implements vscode.Disposable {
 	private async initialize(): Promise<void> {
 		try {
 			await this.client.start();
-			const [models, state] = await Promise.all([
+			const [models, state, messages] = await Promise.all([
 				this.client.getAvailableModels(),
 				this.client.getState(),
+				this.client.getMessages(),
 			]);
 			this.models = models;
 			const currentModel = (state as { model?: Model | null } | undefined)?.model;
+			this.contextWindow = this.getModelContextWindow(currentModel);
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
 			this.post({ type: 'models', models, selected: currentModel ? this.modelKey(currentModel) : undefined });
-			this.post({ type: 'status', message: 'Connected to Pi.' });
+			await this.postSessionStatus(messages);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.post({ type: 'error', message: `Unable to start Pi RPC: ${message}` });
@@ -146,9 +164,10 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 
-		this.activeAssistantMessageId = undefined;
 		this.activeThinkingMessageId = undefined;
+		this.activeLoadingMessageId = undefined;
 		this.activeToolCallIds.clear();
+		this.activeTextMessageIds.clear();
 		this.hasSessionTitle = false;
 		this.post({ type: 'clearMessages' });
 
@@ -163,7 +182,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		const title = session.name || firstUserMessage || 'New Chat';
 		this.hasSessionTitle = Boolean(firstUserMessage || session.name);
 		this.post({ type: 'sessionTitle', title: this.truncate(title, 50) });
-		this.post({ type: 'status', message: 'Session restored.' });
+		await this.postSessionStatus(messages);
 	}
 
 	private restoreMessage(
@@ -277,6 +296,122 @@ export class CrustChatPanel implements vscode.Disposable {
 		});
 	}
 
+	private async refreshUsageStatus(): Promise<void> {
+		try {
+			await this.postSessionStatus(await this.client.getMessages());
+		} catch {
+			// Usage is informational; avoid replacing a more useful status with an error.
+		}
+	}
+
+	private async postSessionStatus(messages: unknown[]): Promise<void> {
+		if (!messages.length) {
+			this.post({ type: 'status', message: await this.getWorkspaceStatus() });
+			return;
+		}
+		this.postUsageStatus(messages);
+	}
+
+	private async getWorkspaceStatus(): Promise<string> {
+		if (!this.cwd) {
+			return 'No workspace folder';
+		}
+
+		const branch = await this.getGitBranch();
+		return branch ? `${this.cwd} · ${branch}` : `${this.cwd} · no branch`;
+	}
+
+	private async getGitBranch(): Promise<string | undefined> {
+		if (!this.cwd) {
+			return undefined;
+		}
+		try {
+			const { stdout } = await execFileAsync('git', ['-C', this.cwd, 'branch', '--show-current']);
+			return stdout.trim() || undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private postUsageStatus(messages: unknown[]): void {
+		this.post({ type: 'status', message: this.formatUsageStats(this.getUsageStats(messages)) });
+	}
+
+	private getUsageStats(messages: unknown[]): UsageStats {
+		const stats: UsageStats = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, contextTokens: 0, cost: 0 };
+		for (const message of messages) {
+			const usage = this.getMessageUsage(message);
+			if (!usage) {
+				continue;
+			}
+			stats.input += this.getNumber(usage.input);
+			stats.output += this.getNumber(usage.output);
+			stats.cacheRead += this.getNumber(usage.cacheRead);
+			stats.cacheWrite += this.getNumber(usage.cacheWrite);
+			stats.contextTokens = this.getNumber(usage.totalTokens) || stats.contextTokens;
+			stats.totalTokens += this.getNumber(usage.totalTokens);
+			const cost = typeof usage.cost === 'object' && usage.cost !== null ? usage.cost as Record<string, unknown> : undefined;
+			stats.cost += this.getNumber(cost?.total);
+		}
+		if (!stats.totalTokens) {
+			stats.totalTokens = stats.input + stats.output + stats.cacheRead + stats.cacheWrite;
+		}
+		return stats;
+	}
+
+	private getMessageUsage(message: unknown): Record<string, unknown> | undefined {
+		if (typeof message !== 'object' || message === null) {
+			return undefined;
+		}
+		const record = message as { usage?: unknown; message?: unknown };
+		const candidate = record.usage ?? (typeof record.message === 'object' && record.message !== null ? (record.message as { usage?: unknown }).usage : undefined);
+		return typeof candidate === 'object' && candidate !== null ? candidate as Record<string, unknown> : undefined;
+	}
+
+	private formatUsageStats(stats: UsageStats): string {
+		const parts = [
+			`${this.formatTokenCount(stats.totalTokens)}`,
+			`${this.formatTokenCount(stats.input)} in`,
+			`${this.formatTokenCount(stats.output)} out`,
+		];
+		if (this.contextWindow) {
+			parts.push(this.formatContextUsage(stats.contextTokens, this.contextWindow));
+		}
+		parts.push(this.formatCost(stats.cost));
+		return `${parts.join(' · ')}`;
+	}
+
+	private formatContextUsage(usedTokens: number, availableTokens: number): string {
+		const percent = availableTokens > 0 ? (usedTokens / availableTokens) * 100 : 0;
+		return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(percent)}%/${this.formatTokenCount(availableTokens)}`;
+	}
+
+	private formatTokenCount(value: number): string {
+		const absolute = Math.abs(value);
+		const units = [
+			{ suffix: 'T', value: 1_000_000_000_000 },
+			{ suffix: 'B', value: 1_000_000_000 },
+			{ suffix: 'M', value: 1_000_000 },
+			{ suffix: 'k', value: 1_000 },
+		];
+		const unit = units.find((candidate) => absolute >= candidate.value);
+		if (!unit) {
+			return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.round(value));
+		}
+
+		const scaled = value / unit.value;
+		const maxFractionDigits = Math.max(0, 2 - Math.floor(Math.log10(Math.abs(scaled))) - 1);
+		return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: maxFractionDigits }).format(scaled)}${unit.suffix}`;
+	}
+
+	private formatCost(value: number): string {
+		return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+	}
+
+	private getNumber(value: unknown): number {
+		return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+	}
+
 	private getMessageContent(message: unknown): unknown {
 		return typeof message === 'object' && message !== null ? (message as { content?: unknown }).content : undefined;
 	}
@@ -304,15 +439,18 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		const userMessageId = this.createId('user');
-		const assistantMessageId = this.createId('assistant');
-		this.activeAssistantMessageId = assistantMessageId;
+		this.activeLoadingMessageId = this.createId('loading');
+		this.activeTextMessageIds.clear();
 		this.post({ type: 'addMessage', id: userMessageId, role: 'user', text: trimmed });
-		this.post({ type: 'addMessage', id: assistantMessageId, role: 'assistant', text: '', loading: true });
+		this.post({ type: 'addMessage', id: this.activeLoadingMessageId, role: 'assistant', text: '', loading: true });
+		this.postUsageStatus([]);
 
 		try {
 			await this.client.prompt(trimmed, this.isStreaming ? 'followUp' : undefined);
 		} catch (error) {
+			const assistantMessageId = this.getStreamingTextMessageId(0);
 			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\nError: ${error instanceof Error ? error.message : String(error)}` });
+			this.removeActiveLoadingMessage();
 		}
 	}
 
@@ -324,7 +462,8 @@ export class CrustChatPanel implements vscode.Disposable {
 
 		try {
 			await this.client.setModel(model);
-			this.post({ type: 'status', message: `Model: ${this.modelLabel(model)}` });
+			this.contextWindow = this.getModelContextWindow(model);
+			await this.postSessionStatus(await this.client.getMessages());
 		} catch (error) {
 			this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
 		}
@@ -335,14 +474,17 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.isStreaming = true;
 			this.activeThinkingMessageId = undefined;
 			this.activeToolCallIds.clear();
+			this.activeTextMessageIds.clear();
 			return;
 		}
 
 		if (event.type === 'agent_end') {
 			this.isStreaming = false;
-			this.activeAssistantMessageId = undefined;
 			this.activeThinkingMessageId = undefined;
 			this.activeToolCallIds.clear();
+			this.activeTextMessageIds.clear();
+			this.removeActiveLoadingMessage();
+			void this.refreshUsageStatus();
 			return;
 		}
 
@@ -368,18 +510,34 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.showStreamingThinking(event);
 		this.showStreamingToolCall(event);
 
-		if (!this.activeAssistantMessageId) {
-			return;
-		}
-
 		const assistantEvent = event.assistantMessageEvent;
 		if (assistantEvent?.type === 'text_delta' && assistantEvent.delta) {
-			this.post({ type: 'appendMessage', id: this.activeAssistantMessageId, text: assistantEvent.delta });
+			this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(assistantEvent.contentIndex ?? 0), text: assistantEvent.delta });
 		}
 
 		if (assistantEvent?.type === 'error') {
-			this.post({ type: 'appendMessage', id: this.activeAssistantMessageId, text: `\nError: ${assistantEvent.reason ?? 'unknown error'}` });
+			this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(assistantEvent.contentIndex ?? 0), text: `\nError: ${assistantEvent.reason ?? 'unknown error'}` });
 		}
+	}
+
+	private getStreamingTextMessageId(contentIndex: number): string {
+		const existing = this.activeTextMessageIds.get(contentIndex);
+		if (existing) {
+			return existing;
+		}
+
+		const id = this.createId('assistant');
+		this.activeTextMessageIds.set(contentIndex, id);
+		this.post({ type: 'addMessage', id, role: 'assistant', text: '' });
+		return id;
+	}
+
+	private removeActiveLoadingMessage(): void {
+		if (!this.activeLoadingMessageId) {
+			return;
+		}
+		this.post({ type: 'removeMessage', id: this.activeLoadingMessageId });
+		this.activeLoadingMessageId = undefined;
 	}
 
 	private showToolExecutionStart(event: RpcEvent): void {
@@ -697,6 +855,11 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private modelLabel(model: Model): string {
 		return `${model.name ?? model.id} (${model.provider})`;
+	}
+
+	private getModelContextWindow(model: Model | null | undefined): number | undefined {
+		const contextWindow = (model as { contextWindow?: unknown } | null | undefined)?.contextWindow;
+		return typeof contextWindow === 'number' && Number.isFinite(contextWindow) ? contextWindow : undefined;
 	}
 
 	private createId(prefix: string): string {

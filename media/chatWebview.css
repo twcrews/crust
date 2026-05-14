@@ -1,5 +1,6 @@
 :root {
 	color-scheme: light dark;
+	scroll-behavior: smooth;
 }
 body {
 	margin: 0;
@@ -45,12 +46,14 @@ body {
 	background: var(--vscode-toolbar-hoverBackground, transparent);
 }
 .messages {
+	position: relative;
 	flex: 1;
 	overflow-y: auto;
+	scroll-behavior: smooth;
 	padding: 16px;
 	padding-bottom: 8px;
 }
-.messages,
+.messages-content,
 .controls {
 	box-sizing: border-box;
 	width: 100%;
@@ -58,6 +61,38 @@ body {
 	margin-left: auto;
 	margin-right: auto;
 }
+
+.messages-content {
+	max-width: 640px;
+}
+.empty-state {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	width: min(320px, calc(100% - 48px));
+	transform: translate(-50%, -50%);
+	text-align: center;
+	pointer-events: none;
+}
+.empty-state.hidden {
+	display: none;
+}
+.empty-state-icon {
+	width: 96px;
+	height: 96px;
+	margin-bottom: 16px;
+	opacity: 0.9;
+}
+.empty-state-text {
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	line-height: 1.45;
+}
+
 .message {
 	box-sizing: border-box;
 	width: 100%;
@@ -78,6 +113,16 @@ body {
 	border-radius: 8px;
 	background: var(--vscode-button-background);
 	color: var(--vscode-button-foreground);
+}
+.user-prompt-divider {
+	box-sizing: border-box;
+	width: 100%;
+	padding: 16px 0 24px;
+}
+.user-prompt-divider::before {
+	content: '';
+	display: block;
+	border-top: 1px solid var(--vscode-sideBar-border);
 }
 .assistant {
 	border-left-color: var(--vscode-editor-inactiveSelectionBackground);
@@ -364,6 +409,17 @@ select:hover {
 }
 .error {
 	color: var(--vscode-errorForeground);
+}
+
+@media (max-width: 640px) {
+	.metadata-row {
+		align-items: flex-start;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.status {
+		text-align: left;
+	}
 }
 
 @keyframes spin {

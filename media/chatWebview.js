@@ -1,6 +1,8 @@
 const vscode = acquireVsCodeApi();
 const sessionTitle = document.getElementById("session-title");
 const messages = document.getElementById("messages");
+const messagesContent = document.getElementById("messages-content");
+const emptyState = document.getElementById("empty-state");
 const form = document.getElementById("form");
 const prompt = document.getElementById("prompt");
 const model = document.getElementById("model");
@@ -40,8 +42,7 @@ history.addEventListener("click", () => {
 });
 
 jumpTop.addEventListener("click", () => {
-	messages.scrollTop = 0;
-	updateConversationNavButtons();
+	scrollMessagesTo(0, true);
 });
 
 jumpPreviousUser.addEventListener("click", () => {
@@ -53,10 +54,11 @@ jumpNextUser.addEventListener("click", () => {
 });
 
 jumpBottom.addEventListener("click", () => {
-	scrollToBottom();
+	scrollToBottom(true);
 });
 
 messages.addEventListener("scroll", updateConversationNavButtons);
+updateEmptyState();
 updateConversationNavButtons();
 
 window.addEventListener("message", (event) => {
@@ -74,13 +76,17 @@ window.addEventListener("message", (event) => {
 		setStatus(message.message ?? "", true);
 	}
 	if (message.type === "clearMessages") {
-		messages.textContent = "";
+		messagesContent.textContent = "";
+		updateEmptyState();
 	}
 	if (message.type === "addMessage") {
 		addMessage(message.id, message.role, message.text ?? "", message.loading ?? false);
 	}
 	if (message.type === "appendMessage") {
 		appendMessage(message.id, message.text ?? "");
+	}
+	if (message.type === "removeMessage") {
+		removeMessage(message.id);
 	}
 	if (message.type === "upsertTool") {
 		upsertTool(message);
@@ -120,11 +126,20 @@ function setModels(models, selected) {
 }
 
 function addMessage(id, role, text, loading) {
+	if (role === "user" && messagesContent.querySelector(".message.user")) {
+		const divider = document.createElement("div");
+		divider.className = "user-prompt-divider";
+		divider.setAttribute("aria-hidden", "true");
+		messagesContent.append(divider);
+	}
+
 	const element = document.createElement("div");
 	element.id = id;
 	element.className = "message " + role + (loading ? " loading" : "");
 	element.textContent = text;
-	messages.append(element);
+	messagesContent.append(element);
+	updateEmptyState();
+	keepLoadingAtBottom();
 	scrollToBottom();
 }
 
@@ -135,7 +150,18 @@ function appendMessage(id, text) {
 	}
 	element.classList.remove("loading");
 	element.textContent += text;
+	keepLoadingAtBottom();
 	scrollToBottom();
+}
+
+function removeMessage(id) {
+	const element = document.getElementById(id);
+	if (!element) {
+		return;
+	}
+	element.remove();
+	updateEmptyState();
+	updateConversationNavButtons();
 }
 
 function addThinking(id) {
@@ -167,7 +193,9 @@ function addThinking(id) {
 	const body = document.createElement("pre");
 	body.className = "thinking-body";
 	element.append(body);
-	messages.append(element);
+	messagesContent.append(element);
+	updateEmptyState();
+	keepLoadingAtBottom();
 	scrollToBottom();
 }
 
@@ -177,6 +205,7 @@ function appendThinking(id, text) {
 		return;
 	}
 	body.textContent += text;
+	keepLoadingAtBottom();
 	scrollToBottom();
 }
 
@@ -194,7 +223,8 @@ function upsertTool(message) {
 		const body = document.createElement("pre");
 		body.className = "tool-body";
 		element.append(body);
-		messages.append(element);
+		messagesContent.append(element);
+		updateEmptyState();
 	}
 
 	const hasBody = Boolean(message.body);
@@ -208,6 +238,7 @@ function upsertTool(message) {
 	renderToolBody(body, message.body ?? "", Boolean(message.isDiff));
 	body.hidden = !hasBody;
 	body.classList.toggle("diff", Boolean(message.isDiff));
+	keepLoadingAtBottom();
 	scrollToBottom();
 }
 
@@ -264,7 +295,7 @@ function autoResizePrompt() {
 }
 
 function jumpToUserPrompt(direction) {
-	const prompts = Array.from(messages.querySelectorAll(".message.user"));
+	const prompts = Array.from(messagesContent.querySelectorAll(".message.user"));
 	const threshold = 8;
 	const currentTop = messages.scrollTop;
 	let target;
@@ -281,17 +312,23 @@ function jumpToUserPrompt(direction) {
 	}
 
 	if (target) {
-		messages.scrollTop = getMessageScrollTop(target);
-		updateConversationNavButtons();
+		scrollMessagesTo(getMessageScrollTop(target), true);
 		return;
 	}
 	if (direction === "next") {
-		scrollToBottom();
+		scrollToBottom(true);
 	}
 }
 
 function getMessageScrollTop(element) {
-	return Math.max(0, element.offsetTop - messages.offsetTop - 16);
+	return Math.max(
+		0,
+		element.getBoundingClientRect().top - messages.getBoundingClientRect().top + messages.scrollTop - 16,
+	);
+}
+
+function updateEmptyState() {
+	emptyState.classList.toggle("hidden", messagesContent.childElementCount > 0);
 }
 
 function updateConversationNavButtons() {
@@ -305,7 +342,18 @@ function updateConversationNavButtons() {
 	jumpBottom.disabled = atBottom;
 }
 
-function scrollToBottom() {
-	messages.scrollTop = messages.scrollHeight;
+function keepLoadingAtBottom() {
+	const loading = messagesContent.querySelector(".message.loading");
+	if (loading && loading !== messagesContent.lastElementChild) {
+		messagesContent.append(loading);
+	}
+}
+
+function scrollMessagesTo(top, smooth) {
+	messages.scrollTo({ top, behavior: smooth ? "smooth" : "auto" });
 	updateConversationNavButtons();
+}
+
+function scrollToBottom(smooth = false) {
+	scrollMessagesTo(messages.scrollHeight, smooth);
 }
