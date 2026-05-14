@@ -1,0 +1,52 @@
+.conversation-nav {
+	position: fixed;
+	top: 50%;
+	right: 8px;
+	z-index: 10;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 4px;
+	transform: translateY(-50%);
+}
+.conversation-nav-item {
+	position: relative;
+	display: flex;
+}
+.conversation-nav-item::after {
+	content: attr(data-tooltip);
+	position: absolute;
+	top: 50%;
+	right: calc(100% + 8px);
+	max-width: 260px;
+	padding: 4px 8px;
+	transform: translateY(-50%);
+	white-space: nowrap;
+	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+	background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+	border: 1px solid var(--vscode-editorWidget-border, var(--vscode-sideBar-border));
+	border-radius: 3px;
+	box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgb(0 0 0 / 36%));
+	opacity: 0;
+	pointer-events: none;
+	visibility: hidden;
+	font-size: 12px;
+}
+.conversation-nav-item:hover::after {
+	opacity: 1;
+	visibility: visible;
+}
+.conversation-nav-button {
+	align-self: center;
+	color: var(--vscode-icon-foreground, var(--vscode-foreground));
+	background: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-sideBar-border);
+}
+.conversation-nav-button:hover {
+	background: var(--vscode-toolbar-hoverBackground, var(--vscode-button-hoverBackground));
+}
+.conversation-nav-button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+.conversation-nav-button:disabled:hover {

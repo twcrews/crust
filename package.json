@@ -46,7 +46,7 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --noEmit",
-    "check-webview": "node --check media/chatWebview.js",
+    "check-webview": "find media/chatWebview -name '*.js' -print0 | xargs -0 -n1 node --check",
     "lint": "eslint src",
     "test": "vscode-test"
   },

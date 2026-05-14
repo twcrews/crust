@@ -1,0 +1,121 @@
+.messages {
+	position: relative;
+	flex: 1;
+	overflow-y: auto;
+	scroll-behavior: smooth;
+	padding: 16px;
+	padding-bottom: 8px;
+}
+
+.empty-state {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	width: min(320px, calc(100% - 48px));
+	transform: translate(-50%, -50%);
+	text-align: center;
+	pointer-events: none;
+}
+.empty-state.hidden {
+	display: none;
+}
+.empty-state-icon {
+	width: 96px;
+	height: 96px;
+	margin-bottom: 16px;
+	opacity: 0.9;
+}
+.empty-state-text {
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	line-height: 1.45;
+}
+
+.conversation-turn {
+	position: relative;
+	display: flow-root;
+}
+.message {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 100%;
+	margin: 0 0 14px;
+	padding: 4px 0 4px 12px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	line-height: 1.45;
+}
+.user {
+	position: sticky;
+	top: 8px;
+	z-index: 2;
+	width: fit-content;
+	max-width: 80%;
+	margin-left: auto;
+	padding: 10px 12px;
+	border-radius: 8px;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
+}
+.message-context {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: 100%;
+	min-height: 20px;
+	margin-bottom: 6px;
+	padding: 0 6px;
+	overflow: hidden;
+	border-radius: 4px;
+	font-size: 11px;
+	background: color-mix(in srgb, currentColor 12%, transparent);
+	opacity: 0.82;
+}
+.message-context span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.user-message-body {
+	white-space: pre-wrap;
+}
+.user.collapsible:not(.expanded) .user-message-body {
+	display: -webkit-box;
+	max-height: calc(1.45em * 2);
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+}
+.user-message-toggle {
+	align-self: flex-start;
+	width: auto;
+	min-height: auto;
+	margin-top: 6px;
+	padding: 0;
+	font-size: 11px;
+	color: inherit;
+	background: transparent;
+	opacity: 0.82;
+}
+.user-message-toggle:hover {
+	background: transparent;
+	opacity: 1;
+}
+.user-prompt-divider {
+	box-sizing: border-box;
+	width: 100%;
+	padding: 16px 0 24px;
+}
+.user-prompt-divider::before {
+	content: '';
+	display: block;
+	border-top: 1px solid var(--vscode-sideBar-border);
+}
+.assistant {
+	border: none;
+}

@@ -1,0 +1,30 @@
+.title-bar {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	width: 100%;
+	padding: 6px 12px;
+	border-bottom: 1px solid var(--vscode-sideBar-border);
+	background: var(--vscode-sideBar-background);
+}
+.session-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-weight: 600;
+}
+.title-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+.title-action-button {
+	align-self: center;
+	color: var(--vscode-foreground);
+	background: transparent;
+}
+.title-action-button:hover {
+	background: var(--vscode-toolbar-hoverBackground, transparent);
+}

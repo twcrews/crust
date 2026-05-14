@@ -1,0 +1,148 @@
+.thinking-card {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 100%;
+	margin: 0 0 14px;
+	padding-left: 9px;
+}
+.tool-card {
+	box-sizing: border-box;
+	max-width: 90%;
+	margin: 0 0 12px;
+	border: 1px solid var(--vscode-sideBar-border);
+	border-radius: 8px;
+	overflow: hidden;
+	background: var(--vscode-editor-background);
+}
+.thinking-toggle {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 6px;
+	width: 100%;
+	min-height: auto;
+	padding: 4px 0;
+	text-align: left;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+	border-radius: 0;
+}
+.thinking-chevron {
+	width: 0;
+	height: 0;
+	border-top: 4px solid transparent;
+	border-bottom: 4px solid transparent;
+	border-left: 5px solid currentColor;
+	transition: transform 0.12s ease;
+}
+.thinking-card.expanded .thinking-chevron {
+	transform: rotate(90deg);
+}
+.thinking-toggle:hover {
+	background: transparent;
+}
+.thinking-body {
+	display: none;
+	max-height: 240px;
+	margin: 0;
+	padding: 6px 0 4px;
+	overflow: auto;
+	font-size: 12px;
+	line-height: 1.4;
+	color: var(--vscode-descriptionForeground);
+}
+.thinking-card.expanded .thinking-body {
+	display: block;
+}
+.tool-header {
+	padding: 7px 10px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--vscode-descriptionForeground);
+}
+.tool-card.no-body {
+	position: relative;
+	width: 100%;
+	max-width: 100%;
+	padding-left: 16px;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+}
+.tool-card.no-body::before {
+	content: '•';
+	position: absolute;
+	left: 2px;
+	top: 4px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 14px;
+	line-height: 1;
+}
+.tool-card.no-body .tool-header {
+	padding: 4px 0;
+	background: transparent;
+}
+.tool-card.drafting .tool-header,
+.tool-card.pending .tool-header,
+.tool-card.running .tool-header {
+	color: var(--vscode-charts-yellow);
+}
+.tool-card.done .tool-header {
+	color: var(--vscode-charts-green);
+}
+.tool-card.error .tool-header {
+	color: var(--vscode-errorForeground);
+}
+.tool-body {
+	max-height: 360px;
+	margin: 0;
+	padding: 10px;
+	overflow: auto;
+	white-space: pre;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: var(--vscode-editor-font-size, 12px);
+	line-height: 1.4;
+	background-color: var(--vscode-editor-background);
+	border-top: 1px solid var(--vscode-sideBar-border);	
+}
+.tool-body.diff {
+	background: var(--vscode-editor-background);
+}
+.diff-line {
+	display: inline-block;
+	min-width: 100%;
+}
+.diff-line.added {
+	background: var(--vscode-diffEditor-insertedLineBackground, rgb(46 160 67 / 18%));
+}
+.diff-line.deleted {
+	background: var(--vscode-diffEditor-removedLineBackground, rgb(248 81 73 / 18%));
+}
+.message.loading {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	color: var(--vscode-descriptionForeground);
+}
+.message.user.loading {
+	padding: 4px 0 4px 12px;
+	border-radius: 0;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+}
+.message.loading::before {
+	content: '';
+	box-sizing: border-box;
+	width: 14px;
+	height: 14px;
+	border: 2px solid var(--vscode-descriptionForeground);
+	border-top-color: transparent;
+	border-radius: 50%;
+	animation: spin 0.8s linear infinite;
+}
+.message.loading::after {

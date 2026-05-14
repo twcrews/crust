@@ -1,0 +1,29 @@
+:root {
+	color-scheme: light dark;
+	scroll-behavior: smooth;
+}
+body {
+	margin: 0;
+	padding: 0;
+	color: var(--vscode-foreground);
+	background: var(--vscode-sideBar-background);
+	font-family: var(--vscode-font-family);
+}
+[hidden] {
+	display: none !important;
+}
+.app {
+	height: 100vh;
+	display: flex;
+	flex-direction: column;
+
+.controls {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 720px;
+	margin-left: auto;
+	margin-right: auto;
+}
+
+.messages-content {
+	max-width: 640px;

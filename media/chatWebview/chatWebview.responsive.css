@@ -1,0 +1,19 @@
+@media (max-width: 640px) {
+	.metadata-row {
+		align-items: flex-start;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.status {
+		text-align: left;
+	}
+}
+
+@keyframes spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
