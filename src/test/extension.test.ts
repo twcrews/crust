@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import * as vscode from 'vscode';
@@ -104,6 +104,7 @@ suite('Tool utilities', () => {
 		assert.strictEqual(getToolPath({ path: 1 }), undefined);
 		assert.strictEqual(getToolHeaderDetail('read', { path: 'src/a.ts' }), 'src/a.ts');
 		assert.strictEqual(getToolHeaderDetail('bash', { command: 'npm test' }), 'npm test');
+		assert.strictEqual(getToolHeaderDetail('bash', { cmd: 'pnpm test' }), 'pnpm test');
 	});
 
 	test('builds previews for write and edit tools', () => {
@@ -111,6 +112,7 @@ suite('Tool utilities', () => {
 		assert.strictEqual(getToolBody('write', { content: 'new content' }), 'new content');
 		assert.strictEqual(getToolBody('edit', { edits: [{ oldText: 'old\ntext', newText: 'new' }] }), '@@ edit 1 @@\n-old\n-text\n+new');
 		assert.strictEqual(getToolBody('bash', { command: 'npm test' }), '$ npm test');
+		assert.strictEqual(getToolBody('bash', { cmd: 'pnpm test' }), '$ pnpm test');
 		assert.strictEqual(getToolBody('edit', { edits: 'invalid' }), undefined);
 	});
 
@@ -118,6 +120,7 @@ suite('Tool utilities', () => {
 		assert.strictEqual(getToolResultText({ content: [{ type: 'text', text: ' first ' }, { type: 'image', text: 'skip' }, { type: 'text', text: 'second' }] }), 'first \nsecond');
 		assert.strictEqual(getToolResultText({ content: [{ type: 'image', text: 'skip' }] }), undefined);
 		assert.strictEqual(getToolResultText({ details: { stdout: 'out', stderr: 'err' } }), 'out\nerr');
+		assert.strictEqual(getToolResultText({ details: { output: 'out', stdout: 'ignored?' } }), 'out\nignored?');
 		assert.strictEqual(getToolResultText(undefined), undefined);
 	});
 });
@@ -236,6 +239,21 @@ suite('Session history', () => {
 });
 
 suite('Webview HTML and nonce generation', () => {
+	test('renders user messages with markdown and keeps streaming user markdown initialized', async () => {
+		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
+
+		assert.match(source, /function renderUserMessage[\s\S]*setMarkdownContent\(body, text\);/);
+		assert.match(source, /element\.classList\.contains\("user"\)[\s\S]*setMarkdownContent\(body, \(body\.dataset\.markdown \?\? ""\) \+ text\);[\s\S]*initUserMessageToggle\(element\);/);
+	});
+
+	test('renders tool headers with a dedicated tool name element and title text', async () => {
+		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
+
+		assert.match(source, /function upsertTool[\s\S]*toolName\.className = "tool-name";/);
+		assert.match(source, /header\.append\(toolName, document\.createTextNode\(path \+ formatToolStatus\(message\.status\)\)\);/);
+		assert.match(source, /header\.title = headerText;/);
+	});
+
 	test('injects nonce, CSP source, styles, scripts, and icon into the chat webview template', () => {
 		const extensionUri = vscode.Uri.file(resolve(__dirname, '..', '..'));
 		const webview = {
