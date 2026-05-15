@@ -4,6 +4,14 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.2.0] - 2026-05-15
+
+- Added a release staging prompt for verifying, documenting, committing, and tagging releases without publishing.
+- Improved slash command discovery and autocomplete with command deduplication, source metadata normalization, refreshes, and fuzzy matching.
+- Improved restored skill and slash command display in chat history.
+- Fixed tool use streaming correlation and tool card sizing.
+- Expanded tests for RPC guards, slash command metadata, restored prompts, tool utilities, and webview rendering.
+
 ## [0.1.0] - 2026-05-14
 
 - Added rendering for `bash` tool use, including command display and captured output.
@@ -25,6 +33,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.2.0](https://github.com/twcrews/crust/compare/0.1.0...0.2.0)
 [0.1.0](https://github.com/twcrews/crust/compare/0.0.3...0.1.0)
 [0.0.3](https://github.com/twcrews/crust/compare/0.0.2...0.0.3)
 [0.0.2](https://github.com/twcrews/crust/compare/0.0.1...0.0.2)
