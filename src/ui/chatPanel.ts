@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { readFile, realpath } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
@@ -31,6 +31,8 @@ export class CrustChatPanel implements vscode.Disposable {
 	private activeToolCallIds = new Map<string, string>();
 	private activeToolCallArgs = new Map<string, unknown>();
 	private activeTextMessageIds = new Map<number, string>();
+	private usageMessages: unknown[] = [];
+	private activeUsageMessage: unknown;
 	private lastActiveTextEditor = vscode.window.activeTextEditor;
 	private piSlashCommands: SlashCommand[] = [];
 	private builtinSlashCommands: SlashCommand[] = [];
@@ -395,11 +397,13 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private async postSessionStatus(messages: unknown[]): Promise<void> {
+		this.usageMessages = messages;
+		this.activeUsageMessage = undefined;
 		if (!messages.length) {
 			this.post({ type: 'status', message: await this.getWorkspaceStatus() });
 			return;
 		}
-		this.postUsageStatus(messages);
+		this.postCurrentUsageStatus();
 	}
 
 	private async refreshSlashCommands(): Promise<void> {
@@ -515,8 +519,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			return 'No workspace folder';
 		}
 
+		const workspaceName = basename(this.cwd) || this.cwd;
 		const branch = await this.getGitBranch();
-		return branch ? `${this.cwd} · ${branch}` : `${this.cwd} · no branch`;
+		return branch ? `${workspaceName} - ${branch}` : `${workspaceName} - no branch`;
 	}
 
 	private async getGitBranch(): Promise<string | undefined> {
@@ -531,7 +536,8 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 
-	private postUsageStatus(messages: unknown[]): void {
+	private postCurrentUsageStatus(): void {
+		const messages = this.activeUsageMessage === undefined ? this.usageMessages : [...this.usageMessages, this.activeUsageMessage];
 		this.post({ type: 'status', message: formatUsageStatus(messages, this.contextWindow) });
 	}
 
@@ -559,7 +565,10 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.activeTextMessageIds.clear();
 		this.post({ type: 'addMessage', id: userMessageId, role: 'user', text: displayText, ideContextLabel: ideContext?.label, slashCommandLabel: display?.slashCommandLabel });
 		this.post({ type: 'addMessage', id: this.activeLoadingMessageId, role: 'assistant', text: '', loading: true });
-		this.postUsageStatus([]);
+		this.activeUsageMessage = undefined;
+		if (this.usageMessages.length) {
+			this.postCurrentUsageStatus();
+		}
 
 		try {
 			await this.client.prompt(promptText, this.isStreaming ? 'followUp' : undefined);
@@ -627,6 +636,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 
+		this.showStreamingUsage(event);
 		this.showStreamingThinking(event);
 		this.showStreamingToolCall(event);
 
@@ -709,6 +719,23 @@ export class CrustChatPanel implements vscode.Disposable {
 			body: event.toolName === 'read' ? undefined : diff ?? getToolResultText(event.result) ?? getToolBody(event.toolName, args),
 			isDiff: Boolean(diff),
 		});
+	}
+
+	private showStreamingUsage(event: RpcEvent): void {
+		if (event.message === undefined || !this.hasMessageUsage(event.message)) {
+			return;
+		}
+		this.activeUsageMessage = event.message;
+		this.postCurrentUsageStatus();
+	}
+
+	private hasMessageUsage(message: unknown): boolean {
+		if (typeof message !== 'object' || message === null) {
+			return false;
+		}
+		const record = message as { usage?: unknown; message?: unknown };
+		const usage = record.usage ?? (typeof record.message === 'object' && record.message !== null ? (record.message as { usage?: unknown }).usage : undefined);
+		return typeof usage === 'object' && usage !== null;
 	}
 
 	private showStreamingThinking(event: RpcEvent): void {
