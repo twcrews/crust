@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import * as vscode from 'vscode';
+import { PiRpcClient } from '../pi/piRpcClient';
 import { isRpcEvent, isRpcResponse, isSlashCommand, normalizeSlashCommand } from '../pi/rpcTypes';
 import { buildPromptWithIdeContext, extractRestoredPrompt, formatSelectionRange, getIdeContext } from '../ui/ideContext';
 import { getMessageContent, getBlockText, getBlockType, getEntryTimestamp, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from '../ui/messageUtils';
@@ -56,6 +57,38 @@ suite('RPC type guards', () => {
 		});
 		assert.strictEqual(normalizeSlashCommand({ name: 'bad', sourceInfo: { path: '/tmp/cmd.md' } }), undefined);
 		assert.strictEqual(isSlashCommand({ name: 'bad', path: 1 }), false);
+	});
+});
+
+suite('Pi RPC client', () => {
+	test('sends steer and abort RPC commands', async () => {
+		type TestableClient = {
+			start: () => Promise<void>;
+			process?: { stdin: { write: (payload: string, callback: (error?: Error) => void) => void } };
+			handleStdout: (chunk: string) => void;
+		};
+
+		const client = new PiRpcClient(undefined);
+		const testable = client as unknown as TestableClient;
+		const sentTypes: string[] = [];
+
+		testable.start = async () => {
+			testable.process = {
+				stdin: {
+					write: (payload, callback) => {
+						const command = JSON.parse(payload) as { id: string; type: string };
+						sentTypes.push(command.type);
+						callback();
+						testable.handleStdout(`${JSON.stringify({ type: 'response', id: command.id, command: command.type, success: true })}\n`);
+					},
+				},
+			};
+		};
+
+		await client.steer('adjust course');
+		await client.abort();
+
+		assert.deepStrictEqual(sentTypes, ['steer', 'abort']);
 	});
 });
 
@@ -322,6 +355,19 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(source, /function upsertTool[\s\S]*toolName\.className = "tool-name";/);
 		assert.match(source, /header\.append\(toolName, document\.createTextNode\(path \+ formatToolStatus\(message\.status\)\)\);/);
 		assert.match(source, /header\.title = headerText;/);
+	});
+
+	test('wires processing state to steering and cancellation controls', async () => {
+		const html = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview.html'), 'utf8');
+		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
+		const renderingSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
+
+		assert.match(html, /<button id="submit" type="submit"/);
+		assert.match(html, /<svg class="stop-icon"/);
+		assert.match(source, /vscode\.postMessage\(\{ type: "steer", text \}\);/);
+		assert.match(source, /vscode\.postMessage\(\{ type: "cancel" \}\);/);
+		assert.match(source, /if \(message\.type === "processing"\) \{[\s\S]*setProcessing\(message\.processing === true\);[\s\S]*\}/);
+		assert.match(renderingSource, /secondary \? " secondary" : ""/);
 	});
 
 	test('injects nonce, CSP source, styles, scripts, and icon into the chat webview template', () => {
