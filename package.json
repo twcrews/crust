@@ -7,7 +7,7 @@
   "icon": "branding/icon.png",
   "repository": "https://github.com/twcrews/crust",
   "engines": {
-    "vscode": "^1.118.0"
+    "vscode": "^1.74.0"
   },
   "categories": [
     "AI",
@@ -47,12 +47,15 @@
     "check-types": "tsc --noEmit",
     "check-webview": "find media/chatWebview -name '*.js' -print0 | xargs -0 -n1 node --check",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "npm-run-all test:min-vscode test:current-vscode",
+    "test:min-vscode": "vscode-test --code-version 1.74.0",
+    "test:current-vscode": "vscode-test",
+    "test:quick": "vscode-test --code-version 1.74.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.8.0",
-    "@types/vscode": "^1.120.0",
+    "@types/vscode": "1.74.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.9.1",
