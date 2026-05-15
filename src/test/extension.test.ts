@@ -2,8 +2,9 @@ import * as assert from 'assert';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import * as vscode from 'vscode';
-import { isRpcEvent, isRpcResponse } from '../pi/rpcTypes';
+import { isRpcEvent, isRpcResponse, isSlashCommand, normalizeSlashCommand } from '../pi/rpcTypes';
 import { buildPromptWithIdeContext, extractRestoredPrompt, formatSelectionRange, getIdeContext } from '../ui/ideContext';
 import { getMessageContent, getBlockText, getBlockType, getEntryTimestamp, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from '../ui/messageUtils';
 import { getPathSuggestions } from '../ui/pathAutocomplete';
@@ -25,6 +26,36 @@ suite('RPC type guards', () => {
 		assert.strictEqual(isRpcEvent({ type: 'assistant_message', assistantMessageEvent: { type: 'delta' } }), true);
 		assert.strictEqual(isRpcEvent({ type: 42 }), false);
 		assert.strictEqual(isRpcEvent(undefined), false);
+	});
+
+	test('normalizes slash command sourceInfo from Pi RPC', () => {
+		const command = normalizeSlashCommand({
+			name: 'project:fix',
+			description: 'Fix something',
+			source: 'custom',
+			sourceInfo: {
+				path: '/repo/.pi/commands/fix.md',
+				source: 'filesystem',
+				scope: 'project',
+				origin: 'top-level',
+			},
+		});
+
+		assert.deepStrictEqual(command, {
+			name: 'project:fix',
+			description: 'Fix something',
+			source: 'custom',
+			location: 'project',
+			path: '/repo/.pi/commands/fix.md',
+			sourceInfo: {
+				path: '/repo/.pi/commands/fix.md',
+				source: 'filesystem',
+				scope: 'project',
+				origin: 'top-level',
+			},
+		});
+		assert.strictEqual(normalizeSlashCommand({ name: 'bad', sourceInfo: { path: '/tmp/cmd.md' } }), undefined);
+		assert.strictEqual(isSlashCommand({ name: 'bad', path: 1 }), false);
 	});
 });
 
@@ -239,6 +270,24 @@ suite('Session history', () => {
 });
 
 suite('Webview HTML and nonce generation', () => {
+	test('ranks slash command autocomplete fuzzily and formats sourceInfo metadata', async () => {
+		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.autocomplete.js'), 'utf8');
+		const api = runInNewContext(`${source}\n({ getSlashCommandSuggestions, formatSlashCommandSource });`, {
+			slashCommands: [
+				{ name: 'compact', command: '/compact' },
+				{ name: 'project:fix', command: '/project:fix' },
+				{ name: 'resume', command: '/resume' },
+			],
+		}) as {
+			getSlashCommandSuggestions: (value: string) => Array<{ command: string }>;
+			formatSlashCommandSource: (command: unknown) => string;
+		};
+
+		assert.deepStrictEqual(api.getSlashCommandSuggestions('/fx').map((suggestion) => suggestion.command), ['/project:fix']);
+		assert.deepStrictEqual(api.getSlashCommandSuggestions('/co').map((suggestion) => suggestion.command).slice(0, 1), ['/compact']);
+		assert.strictEqual(api.formatSlashCommandSource({ source: 'custom', sourceInfo: { scope: 'project', path: '/repo/.pi/commands/fix.md' } }), 'custom · project · /repo/.pi/commands/fix.md');
+	});
+
 	test('renders user messages with markdown and keeps streaming user markdown initialized', async () => {
 		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
 
