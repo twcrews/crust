@@ -105,8 +105,27 @@ suite('IDE context utilities', () => {
 		assert.ok(prompt.startsWith('<ide_context>\nCurrent file: src/example.ts\nSelected lines: 2-3'));
 		assert.ok(prompt.includes('```typescript\nconst x = 1;\n```'));
 		assert.strictEqual(prompt.endsWith('\n\nFix this'), true);
-		assert.deepStrictEqual(extractRestoredPrompt(prompt), { text: 'Fix this', ideContextLabel: 'example.ts:2-3' });
-		assert.deepStrictEqual(extractRestoredPrompt('No wrapper'), { text: 'No wrapper' });
+		assert.deepStrictEqual(extractRestoredPrompt(prompt), { text: 'Fix this', ideContextLabel: 'example.ts:2-3', skillLabel: undefined });
+		assert.deepStrictEqual(extractRestoredPrompt('No wrapper'), { text: 'No wrapper', ideContextLabel: undefined, skillLabel: undefined });
+	});
+
+	test('strips restored skill wrappers and preserves user text', () => {
+		const skillPrompt = [
+			'<skill name="review" location="/repo/.pi/skills/review.md">',
+			'Skill instructions',
+			'</skill>',
+			'',
+			'User: Review this file',
+		].join('\n');
+
+		assert.deepStrictEqual(extractRestoredPrompt(skillPrompt), { text: 'Review this file', ideContextLabel: undefined, skillLabel: '/skill:review' });
+		assert.deepStrictEqual(extractRestoredPrompt(skillPrompt.replace('\n\nUser: Review this file', '')), { text: '', ideContextLabel: undefined, skillLabel: '/skill:review' });
+	});
+
+	test('strips IDE context before restored skill wrappers', () => {
+		const prompt = `${buildPromptWithIdeContext('', { label: 'example.ts', filePath: 'src/example.ts', languageId: 'typescript' }).trim()}\n<skill name="fix" location="/repo/.pi/skills/fix.md">\nSkill instructions\n</skill>\n\nUser: Fix this`;
+
+		assert.deepStrictEqual(extractRestoredPrompt(prompt), { text: 'Fix this', ideContextLabel: 'example.ts', skillLabel: '/skill:fix' });
 	});
 
 	test('gets file and selection context from an editor', async () => {
@@ -288,10 +307,12 @@ suite('Webview HTML and nonce generation', () => {
 		assert.strictEqual(api.formatSlashCommandSource({ source: 'custom', sourceInfo: { scope: 'project', path: '/repo/.pi/commands/fix.md' } }), 'custom · project · /repo/.pi/commands/fix.md');
 	});
 
-	test('renders user messages with markdown and keeps streaming user markdown initialized', async () => {
+	test('renders user messages with context labels and markdown bodies', async () => {
 		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
 
-		assert.match(source, /function renderUserMessage[\s\S]*setMarkdownContent\(body, text\);/);
+		assert.match(source, /function renderUserMessage\(element, text, ideContextLabel, slashCommandLabel\)[\s\S]*appendMessageContext\(element, ideContextLabel, ideContextLabel, createEyeIcon\(\)\);/);
+		assert.match(source, /slashCommandLabel\.startsWith\("\/skill:"\) \? "Skill: " \+ slashCommandLabel\.slice\(7\) : "Slash command: " \+ slashCommandLabel/);
+		assert.match(source, /if \(text\) \{[\s\S]*setMarkdownContent\(body, text\);[\s\S]*\}/);
 		assert.match(source, /element\.classList\.contains\("user"\)[\s\S]*setMarkdownContent\(body, \(body\.dataset\.markdown \?\? ""\) \+ text\);[\s\S]*initUserMessageToggle\(element\);/);
 	});
 
