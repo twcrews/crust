@@ -20,19 +20,49 @@ form.addEventListener("submit", (event) => {
 	if (!text.trim()) {
 		return;
 	}
-	if (runSlashCommand(text)) {
+	if (!piProcessing && runSlashCommand(text)) {
 		return;
 	}
 	prompt.value = "";
 	autoResizePrompt();
 	updateSlashAutocomplete();
+	updateSubmitButton();
+	if (piProcessing) {
+		logWebview("Steering prompt", { length: text.trim().length });
+		vscode.postMessage({ type: "steer", text });
+		return;
+	}
+	setProcessing(true);
 	logWebview("Submitting prompt", { length: text.trim().length, includeIdeContext: ideContextEnabled && !ideContext.classList.contains("hidden") });
 	vscode.postMessage({ type: "submit", text, includeIdeContext: ideContextEnabled && !ideContext.classList.contains("hidden") });
 });
 
+submit.addEventListener("click", (event) => {
+	if (!piProcessing || prompt.value.trim()) {
+		return;
+	}
+	event.preventDefault();
+	logWebview("Cancelling prompt");
+	vscode.postMessage({ type: "cancel" });
+});
+
+function setProcessing(isProcessing) {
+	piProcessing = Boolean(isProcessing);
+	prompt.placeholder = piProcessing ? "Steer Pi's current task..." : "Ask Pi...";
+	updateSubmitButton();
+}
+
+function updateSubmitButton() {
+	const isStop = piProcessing && !prompt.value.trim();
+	submit.classList.toggle("stop", isStop);
+	submit.setAttribute("aria-label", isStop ? "Stop Pi" : "Submit prompt");
+	submit.title = isStop ? "Stop Pi" : "Submit prompt";
+}
+
 prompt.addEventListener("input", () => {
 	autoResizePrompt();
 	updateSlashAutocomplete();
+	updateSubmitButton();
 });
 prompt.addEventListener("focus", updateSlashAutocomplete);
 prompt.addEventListener("blur", () => {
@@ -101,6 +131,9 @@ window.addEventListener("message", (event) => {
 	if (message.type === "status") {
 		setStatus(message.message ?? "", false);
 	}
+	if (message.type === "processing") {
+		setProcessing(message.processing === true);
+	}
 	if (message.type === "sessionTitle") {
 		setSessionTitle(message.title ?? "New Chat");
 	}
@@ -117,7 +150,7 @@ window.addEventListener("message", (event) => {
 		updateEmptyState();
 	}
 	if (message.type === "addMessage") {
-		addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "", message.slashCommandLabel ?? "");
+		addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "", message.slashCommandLabel ?? "", message.secondary === true);
 	}
 	if (message.type === "appendMessage") {
 		appendMessage(message.id, message.text ?? "");

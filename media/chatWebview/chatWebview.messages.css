@@ -133,3 +133,6 @@
 .assistant {
 	border: none;
 }
+.message.secondary {
+	color: var(--vscode-descriptionForeground);
+}

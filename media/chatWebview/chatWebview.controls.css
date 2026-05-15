@@ -173,6 +173,20 @@ button svg {
 button:hover {
 	background: var(--vscode-button-hoverBackground);
 }
+#submit .stop-icon,
+#submit.stop .submit-icon {
+	display: none;
+}
+#submit.stop .stop-icon {
+	display: block;
+}
+#submit.stop {
+	background: var(--vscode-errorForeground, #f14c4c);
+	color: var(--vscode-button-foreground);
+}
+#submit.stop:hover {
+	background: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 85%, black);
+}
 
 .metadata-row {
 	display: flex;

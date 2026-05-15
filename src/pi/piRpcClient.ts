@@ -103,6 +103,14 @@ export class PiRpcClient implements vscode.Disposable {
 		await this.send({ type: 'prompt', message, ...(streamingBehavior ? { streamingBehavior } : {}) });
 	}
 
+	async steer(message: string): Promise<void> {
+		await this.send({ type: 'steer', message });
+	}
+
+	async abort(): Promise<void> {
+		await this.send({ type: 'abort' });
+	}
+
 	dispose(): void {
 		this.eventEmitter.dispose();
 		this.errorEmitter.dispose();

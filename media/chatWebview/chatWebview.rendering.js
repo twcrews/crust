@@ -24,10 +24,10 @@ function setModels(models, selected) {
 	}
 }
 
-function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel) {
+function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel, secondary) {
 	const element = document.createElement("div");
 	element.id = id;
-	element.className = "message " + role + (loading ? " loading" : "");
+	element.className = "message " + role + (loading ? " loading" : "") + (secondary ? " secondary" : "");
 	if (role === "assistant" && !loading) {
 		setMarkdownContent(element, text);
 	} else if (role === "user") {
