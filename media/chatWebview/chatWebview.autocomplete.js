@@ -7,11 +7,15 @@ function setSlashCommands(commands) {
 			description: command.description || formatSlashCommandSource(command),
 			source: command.source,
 		}));
-	updateSlashAutocomplete();
+	logWebview("Slash commands updated", { count: slashCommands.length, commands: slashCommands.slice(0, 20).map((command) => command.command) });
+	updateSlashAutocomplete(false);
 }
 
 function formatSlashCommandSource(command) {
-	const parts = [command.source, command.location].filter((part) => typeof part === "string" && part);
+	const sourceInfo = command.sourceInfo && typeof command.sourceInfo === "object" ? command.sourceInfo : undefined;
+	const location = command.location || sourceInfo?.scope;
+	const path = command.path || sourceInfo?.path;
+	const parts = [command.source, location, path].filter((part) => typeof part === "string" && part);
 	return parts.join(" · ");
 }
 
@@ -35,11 +39,14 @@ function runSlashCommand(text) {
 	return true;
 }
 
-function updateSlashAutocomplete() {
+function updateSlashAutocomplete(requestRefresh = true) {
 	const value = prompt.value.trimStart();
 	if (value.startsWith("/") && !/\s/.test(value)) {
 		autocompleteMode = "slash";
-		slashSuggestions = slashCommands.filter((candidate) => candidate.command.startsWith(value));
+		if (requestRefresh) {
+			requestSlashCommandsRefresh();
+		}
+		slashSuggestions = getSlashCommandSuggestions(value);
 		if (!slashSuggestions.length) {
 			hideSlashAutocomplete();
 			return;
@@ -58,6 +65,58 @@ function updateSlashAutocomplete() {
 	}
 
 	hideSlashAutocomplete();
+}
+
+function requestSlashCommandsRefresh() {
+	window.clearTimeout(slashCommandRefreshTimer);
+	slashCommandRefreshTimer = window.setTimeout(() => {
+		vscode.postMessage({ type: "refreshSlashCommands" });
+	}, 300);
+}
+
+function getSlashCommandSuggestions(value) {
+	const query = value.replace(/^\/+/, "").toLowerCase();
+	return slashCommands
+		.map((candidate) => ({ ...candidate, score: getSlashCommandScore(candidate, query) }))
+		.filter((candidate) => candidate.score !== undefined)
+		.sort((a, b) => a.score - b.score || a.command.length - b.command.length || a.command.localeCompare(b.command));
+}
+
+function getSlashCommandScore(candidate, query) {
+	if (!query) {
+		return 0;
+	}
+	const searchable = [candidate.name, candidate.command, candidate.name.split(":").pop() || ""].filter(Boolean);
+	let bestScore;
+	for (const value of searchable) {
+		const score = getFuzzyScore(value.toLowerCase(), query);
+		if (score !== undefined && (bestScore === undefined || score < bestScore)) {
+			bestScore = score;
+		}
+	}
+	return bestScore;
+}
+
+function getFuzzyScore(value, query) {
+	if (value === query) {
+		return 0;
+	}
+	if (value.startsWith(query)) {
+		return 10 + value.length / 1000;
+	}
+	const substringIndex = value.indexOf(query);
+	if (substringIndex !== -1) {
+		return 100 + substringIndex * 10 + value.length / 1000;
+	}
+	let queryIndex = 0;
+	let score = 1000;
+	for (let valueIndex = 0; valueIndex < value.length && queryIndex < query.length; valueIndex++) {
+		if (value[valueIndex] === query[queryIndex]) {
+			score += valueIndex;
+			queryIndex++;
+		}
+	}
+	return queryIndex === query.length ? score + value.length / 1000 : undefined;
 }
 
 function getActivePathToken() {

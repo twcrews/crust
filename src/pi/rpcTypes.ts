@@ -37,12 +37,21 @@ export type Model = {
 	provider: string;
 };
 
+export type SlashCommandSourceInfo = {
+	path: string;
+	source: string;
+	scope: 'user' | 'project' | 'temporary' | string;
+	origin: 'package' | 'top-level' | string;
+	baseDir?: string;
+};
+
 export type SlashCommand = {
 	name: string;
 	description?: string;
 	source?: string;
 	location?: string;
 	path?: string;
+	sourceInfo?: SlashCommandSourceInfo;
 };
 
 export function isRpcResponse(message: unknown): message is RpcResponse {

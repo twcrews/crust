@@ -26,6 +26,7 @@ let activeSlashSuggestionIndex = 0;
 let autocompleteMode = "";
 let pathAutocompleteRequestId = 0;
 let latestPathAutocompleteRequestId = 0;
+let slashCommandRefreshTimer = 0;
 
 const emptyStateFlavorTexts = [
 	"Fun fact: this extension was almost named 'Circumference'!",

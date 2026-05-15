@@ -20,7 +20,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	private static currentPanel: CrustChatPanel | undefined;
 	private readonly output = vscode.window.createOutputChannel('Crust');
 	private readonly disposables: vscode.Disposable[] = [];
-	private readonly cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+	private readonly cwd: string | undefined;
 	private readonly client: PiRpcClient;
 	private models: Model[] = [];
 	private contextWindow: number | undefined;
@@ -28,7 +28,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	private activeThinkingMessageId: string | undefined;
 	private activeLoadingMessageId: string | undefined;
 	private hasSessionTitle = false;
-	private activeToolCallIds = new Map<number, string>();
+	private activeToolCallIds = new Map<string, string>();
 	private activeToolCallArgs = new Map<string, unknown>();
 	private activeTextMessageIds = new Map<number, string>();
 	private lastActiveTextEditor = vscode.window.activeTextEditor;
@@ -61,6 +61,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		private readonly context: vscode.ExtensionContext,
 		private readonly panel: vscode.WebviewPanel,
 	) {
+		this.cwd = this.getInitialCwd();
 		this.client = new PiRpcClient(this.cwd);
 		this.log('Creating chat panel', { cwd: this.cwd });
 		this.panel.iconPath = this.getIconPath();
@@ -97,6 +98,28 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 
+	private getInitialCwd(): string | undefined {
+		const activeDocumentUri = vscode.window.activeTextEditor?.document.uri;
+		if (activeDocumentUri?.scheme === 'file') {
+			const workspaceFolder = vscode.workspace.getWorkspaceFolder(activeDocumentUri)?.uri.fsPath;
+			if (workspaceFolder) {
+				return workspaceFolder;
+			}
+
+			return this.getFileBackedCwd(activeDocumentUri.fsPath) ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		}
+		return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+	}
+
+	private getFileBackedCwd(filePath: string): string | undefined {
+		const parts = filePath.split(/[\\/]+/);
+		const piIndex = parts.lastIndexOf('.pi');
+		if (piIndex > 0) {
+			return parts.slice(0, piIndex).join('/') || (filePath.startsWith('/') ? '/' : undefined);
+		}
+		return dirname(filePath);
+	}
+
 	private async initialize(): Promise<void> {
 		this.postIdeContext();
 		try {
@@ -118,7 +141,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.post({ type: 'models', models, selected: currentModel ? this.modelKey(currentModel) : undefined });
 			this.postSlashCommands();
 			await this.postSessionStatus(messages);
-			this.log('Initialized chat panel', { modelCount: models.length, messageCount: messages.length, contextWindow: this.contextWindow });
+			this.log('Initialized chat panel', { modelCount: models.length, messageCount: messages.length, commandCount: commands.length, contextWindow: this.contextWindow });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.log('Failed to initialize chat panel', { error: message });
@@ -146,6 +169,9 @@ export class CrustChatPanel implements vscode.Disposable {
 				break;
 			case 'pathAutocomplete':
 				await this.postPathAutocomplete(message.requestId, message.query ?? '');
+				break;
+			case 'refreshSlashCommands':
+				await this.refreshSlashCommands();
 				break;
 			case 'webviewLog':
 				this.log(`Webview: ${message.message ?? ''}`, message.details);
@@ -384,11 +410,28 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private postSlashCommands(): void {
-		const commands = [
+		const commands = this.dedupeSlashCommands([
 			...this.builtinSlashCommands,
 			...this.piSlashCommands,
-		];
+		]);
+		this.log('Posting slash commands', {
+			cwd: this.cwd,
+			builtinCount: this.builtinSlashCommands.length,
+			piCount: this.piSlashCommands.length,
+			totalCount: commands.length,
+			commandNames: commands.slice(0, 50).map((command) => command.name),
+		});
 		this.post({ type: 'slashCommands', commands });
+	}
+
+	private dedupeSlashCommands(commands: SlashCommand[]): SlashCommand[] {
+		const byName = new Map<string, SlashCommand>();
+		for (const command of commands) {
+			if (!byName.has(command.name)) {
+				byName.set(command.name, command);
+			}
+		}
+		return [...byName.values()];
 	}
 
 	private async getBuiltinSlashCommands(): Promise<SlashCommand[]> {
@@ -680,12 +723,18 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.activeToolCallArgs.set(toolCall.id, toolCall.args);
 		}
 		const contentIndex = assistantEvent.contentIndex ?? 0;
-		const existingId = this.activeToolCallIds.get(contentIndex);
+		const indexKey = `index:${contentIndex}`;
+		const toolKey = toolCall.id ? `id:${toolCall.id}` : indexKey;
+		const existingId = this.activeToolCallIds.get(toolKey) ?? this.activeToolCallIds.get(indexKey);
 		const id = toolCall.id ? this.toolElementId(toolCall.id) : existingId ?? this.createId('toolcall');
-		if (toolCall.id && existingId && existingId !== id) {
-			this.post({ type: 'removeMessage', id: existingId });
+		if (toolCall.id) {
+			const temporaryId = this.activeToolCallIds.get(indexKey);
+			if (temporaryId && temporaryId !== id) {
+				this.post({ type: 'removeMessage', id: temporaryId });
+			}
+			this.activeToolCallIds.delete(indexKey);
 		}
-		this.activeToolCallIds.set(contentIndex, id);
+		this.activeToolCallIds.set(toolKey, id);
 		this.post({
 			type: 'upsertTool',
 			id,

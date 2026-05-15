@@ -72,7 +72,7 @@ export class PiRpcClient implements vscode.Disposable {
 	async getCommands(): Promise<SlashCommand[]> {
 		const response = await this.send({ type: 'get_commands' });
 		const data = response.data as { commands?: unknown[] } | undefined;
-		return Array.isArray(data?.commands) ? data.commands.filter(isSlashCommand) : [];
+		return Array.isArray(data?.commands) ? data.commands.map(normalizeSlashCommand).filter(isDefined) : [];
 	}
 
 	async switchSession(sessionPath: string): Promise<boolean> {
@@ -200,6 +200,18 @@ export class PiRpcClient implements vscode.Disposable {
 	}
 }
 
+function normalizeSlashCommand(value: unknown): SlashCommand | undefined {
+	if (!isSlashCommand(value)) {
+		return undefined;
+	}
+
+	return {
+		...value,
+		location: value.location ?? value.sourceInfo?.scope,
+		path: value.path ?? value.sourceInfo?.path,
+	};
+}
+
 function isSlashCommand(value: unknown): value is SlashCommand {
 	return typeof value === 'object'
 		&& value !== null
@@ -207,5 +219,20 @@ function isSlashCommand(value: unknown): value is SlashCommand {
 		&& ((value as { description?: unknown }).description === undefined || typeof (value as { description?: unknown }).description === 'string')
 		&& ((value as { source?: unknown }).source === undefined || typeof (value as { source?: unknown }).source === 'string')
 		&& ((value as { location?: unknown }).location === undefined || typeof (value as { location?: unknown }).location === 'string')
-		&& ((value as { path?: unknown }).path === undefined || typeof (value as { path?: unknown }).path === 'string');
+		&& ((value as { path?: unknown }).path === undefined || typeof (value as { path?: unknown }).path === 'string')
+		&& ((value as { sourceInfo?: unknown }).sourceInfo === undefined || isSlashCommandSourceInfo((value as { sourceInfo?: unknown }).sourceInfo));
+}
+
+function isSlashCommandSourceInfo(value: unknown): value is NonNullable<SlashCommand['sourceInfo']> {
+	return typeof value === 'object'
+		&& value !== null
+		&& typeof (value as { path?: unknown }).path === 'string'
+		&& typeof (value as { source?: unknown }).source === 'string'
+		&& typeof (value as { scope?: unknown }).scope === 'string'
+		&& typeof (value as { origin?: unknown }).origin === 'string'
+		&& ((value as { baseDir?: unknown }).baseDir === undefined || typeof (value as { baseDir?: unknown }).baseDir === 'string');
+}
+
+function isDefined<T>(value: T | undefined): value is T {
+	return value !== undefined;
 }
