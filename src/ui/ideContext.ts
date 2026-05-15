@@ -57,18 +57,26 @@ export function buildPromptWithIdeContext(prompt: string, ideContext: IdeContext
 	return lines.join('\n');
 }
 
-export function extractRestoredPrompt(text: string): { text: string; ideContextLabel?: string } {
-	const match = text.match(/^<ide_context>\n([\s\S]*?)\n<\/ide_context>\n*/);
-	if (!match) {
-		return { text };
+export function extractRestoredPrompt(text: string): { text: string; ideContextLabel?: string; skillLabel?: string } {
+	let remainingText = text;
+	let ideContextLabel: string | undefined;
+	let skillLabel: string | undefined;
+
+	const ideContextMatch = remainingText.match(/^<ide_context>\n([\s\S]*?)\n<\/ide_context>\n*/);
+	if (ideContextMatch) {
+		const contextText = ideContextMatch[1];
+		const filePath = contextText.match(/^Current file: (.+)$/m)?.[1]?.trim();
+		const selectedLines = contextText.match(/^Selected lines: (.+)$/m)?.[1]?.trim();
+		const fileName = filePath ? basename(filePath) : undefined;
+		ideContextLabel = fileName ? `${fileName}${selectedLines ? `:${selectedLines}` : ''}` : undefined;
+		remainingText = remainingText.slice(ideContextMatch[0].length).trimStart();
 	}
 
-	const contextText = match[1];
-	const filePath = contextText.match(/^Current file: (.+)$/m)?.[1]?.trim();
-	const selectedLines = contextText.match(/^Selected lines: (.+)$/m)?.[1]?.trim();
-	const fileName = filePath ? basename(filePath) : undefined;
-	return {
-		text: text.slice(match[0].length).trimStart(),
-		ideContextLabel: fileName ? `${fileName}${selectedLines ? `:${selectedLines}` : ''}` : undefined,
-	};
+	const skillMatch = remainingText.match(/^<skill name="([^"]+)" location="([^"]+)">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/);
+	if (skillMatch) {
+		skillLabel = `/skill:${skillMatch[1]}`;
+		remainingText = skillMatch[3]?.trim().replace(/^User:\s*/, '') ?? '';
+	}
+
+	return { text: remainingText, ideContextLabel, skillLabel };
 }

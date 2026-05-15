@@ -117,7 +117,7 @@ window.addEventListener("message", (event) => {
 		updateEmptyState();
 	}
 	if (message.type === "addMessage") {
-		addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "");
+		addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "", message.slashCommandLabel ?? "");
 	}
 	if (message.type === "appendMessage") {
 		appendMessage(message.id, message.text ?? "");

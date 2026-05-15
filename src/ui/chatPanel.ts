@@ -274,15 +274,17 @@ export class CrustChatPanel implements vscode.Disposable {
 		const role = getMessageRole(message);
 		if (role === 'user') {
 			const restoredPrompt = extractRestoredPrompt(getMessageText(message).trim());
-			if (restoredPrompt.text) {
+			const slashCommandLabel = restoredPrompt.skillLabel ?? this.getSlashCommandLabel(restoredPrompt.text);
+			if (restoredPrompt.text || slashCommandLabel) {
 				this.post({
 					type: 'addMessage',
 					id: this.createId('user'),
 					role: 'user',
-					text: restoredPrompt.text,
+					text: slashCommandLabel && !restoredPrompt.skillLabel ? '' : restoredPrompt.text,
 					ideContextLabel: restoredPrompt.ideContextLabel,
+					slashCommandLabel,
 				});
-				return restoredPrompt.text;
+				return slashCommandLabel ?? restoredPrompt.text;
 			}
 			return undefined;
 		}
@@ -452,7 +454,8 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private async runSlashCommand(commandName: string, commandText: string): Promise<void> {
 		if (this.piSlashCommands.some((command) => command.name === commandName)) {
-			await this.submitPrompt(commandText || `/${commandName}`, false);
+			const invocation = commandText.trim() || `/${commandName}`;
+			await this.submitPrompt(invocation, false, { text: '', slashCommandLabel: invocation.split(/\r?\n/, 1)[0] });
 			void this.refreshSlashCommands();
 			return;
 		}
@@ -465,6 +468,21 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 		this.post({ type: 'pathAutocomplete', requestId, suggestions: await getPathSuggestions(this.cwd, query) });
+	}
+
+	private getSlashCommandLabel(text: string): string | undefined {
+		const firstLine = text.trim().split(/\r?\n/, 1)[0];
+		const commandName = firstLine.match(/^\/([^\s/]+)(?:\s|$)/)?.[1];
+		if (!commandName) {
+			return undefined;
+		}
+		if (commandName.startsWith('skill:')) {
+			return firstLine;
+		}
+		if (!this.piSlashCommands.some((command) => command.name === commandName)) {
+			return undefined;
+		}
+		return firstLine;
 	}
 
 	private async runBuiltinSlashCommand(commandName: string, commandText: string): Promise<void> {
@@ -522,23 +540,24 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.post({ type: 'ideContext', label: ideContext?.label });
 	}
 
-	private async submitPrompt(text: string, includeIdeContext: boolean): Promise<void> {
+	private async submitPrompt(text: string, includeIdeContext: boolean, display?: { text?: string; slashCommandLabel?: string }): Promise<void> {
 		const trimmed = text.trim();
+		const displayText = display?.text ?? trimmed;
 		const ideContext = includeIdeContext ? getIdeContext(this.lastActiveTextEditor) : undefined;
 		const promptText = ideContext ? buildPromptWithIdeContext(trimmed, ideContext) : trimmed;
-		this.log('Submitting prompt', { length: trimmed.length, promptLength: promptText.length, followUp: this.isStreaming, ideContext: ideContext?.label });
+		this.log('Submitting prompt', { length: trimmed.length, promptLength: promptText.length, followUp: this.isStreaming, ideContext: ideContext?.label, slashCommand: display?.slashCommandLabel });
 		if (!trimmed) {
 			return;
 		}
 
 		if (!this.hasSessionTitle) {
-			this.setSessionTitleFromPrompt(trimmed);
+			this.setSessionTitleFromPrompt(display?.slashCommandLabel ?? displayText);
 		}
 
 		const userMessageId = this.createId('user');
 		this.activeLoadingMessageId = this.createId('loading');
 		this.activeTextMessageIds.clear();
-		this.post({ type: 'addMessage', id: userMessageId, role: 'user', text: trimmed, ideContextLabel: ideContext?.label });
+		this.post({ type: 'addMessage', id: userMessageId, role: 'user', text: displayText, ideContextLabel: ideContext?.label, slashCommandLabel: display?.slashCommandLabel });
 		this.post({ type: 'addMessage', id: this.activeLoadingMessageId, role: 'assistant', text: '', loading: true });
 		this.postUsageStatus([]);
 

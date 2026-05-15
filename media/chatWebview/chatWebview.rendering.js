@@ -24,14 +24,14 @@ function setModels(models, selected) {
 	}
 }
 
-function addMessage(id, role, text, loading, ideContextLabel) {
+function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel) {
 	const element = document.createElement("div");
 	element.id = id;
 	element.className = "message " + role + (loading ? " loading" : "");
 	if (role === "assistant" && !loading) {
 		setMarkdownContent(element, text);
 	} else if (role === "user") {
-		renderUserMessage(element, text, ideContextLabel);
+		renderUserMessage(element, text, ideContextLabel, slashCommandLabel);
 	} else {
 		element.textContent = text;
 	}
@@ -44,22 +44,21 @@ function addMessage(id, role, text, loading, ideContextLabel) {
 	finishContentUpdate();
 }
 
-function renderUserMessage(element, text, ideContextLabel) {
+function renderUserMessage(element, text, ideContextLabel, slashCommandLabel) {
 	if (ideContextLabel) {
-		const context = document.createElement("div");
-		context.className = "message-context";
-		context.title = ideContextLabel;
-		context.append(createEyeIcon());
-		const label = document.createElement("span");
-		label.textContent = ideContextLabel;
-		context.append(label);
-		element.append(context);
+		appendMessageContext(element, ideContextLabel, ideContextLabel, createEyeIcon());
+	}
+	if (slashCommandLabel) {
+		const contextTitle = slashCommandLabel.startsWith("/skill:") ? "Skill: " + slashCommandLabel.slice(7) : "Slash command: " + slashCommandLabel;
+		appendMessageContext(element, slashCommandLabel, contextTitle);
 	}
 
-	const body = document.createElement("div");
-	body.className = "user-message-body";
-	setMarkdownContent(body, text);
-	element.append(body);
+	if (text) {
+		const body = document.createElement("div");
+		body.className = "user-message-body";
+		setMarkdownContent(body, text);
+		element.append(body);
+	}
 
 	const toggle = document.createElement("button");
 	toggle.type = "button";
@@ -74,6 +73,19 @@ function renderUserMessage(element, text, ideContextLabel) {
 		finishContentUpdate();
 	});
 	element.append(toggle);
+}
+
+function appendMessageContext(element, text, title, icon) {
+	const context = document.createElement("div");
+	context.className = "message-context";
+	context.title = title;
+	if (icon) {
+		context.append(icon);
+	}
+	const label = document.createElement("span");
+	label.textContent = text;
+	context.append(label);
+	element.append(context);
 }
 
 function initUserMessageToggle(element) {
