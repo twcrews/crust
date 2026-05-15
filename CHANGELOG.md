@@ -4,6 +4,14 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.3.0] - 2026-05-15
+
+- Added task cancellation and steering controls for active Pi requests.
+- Added support for older VS Code versions and CI/test coverage across minimum and current VS Code releases.
+- Improved usage status reporting and shortened current-working-directory display in chat status text.
+- Constrained user prompt bubble width for improved chat readability.
+- Added Dependabot configuration and refreshed development dependencies.
+
 ## [0.2.0] - 2026-05-15
 
 - Added a release staging prompt for verifying, documenting, committing, and tagging releases without publishing.
@@ -33,6 +41,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.3.0](https://github.com/twcrews/crust/compare/0.2.0...0.3.0)
 [0.2.0](https://github.com/twcrews/crust/compare/0.1.0...0.2.0)
 [0.1.0](https://github.com/twcrews/crust/compare/0.0.3...0.1.0)
 [0.0.3](https://github.com/twcrews/crust/compare/0.0.2...0.0.3)
