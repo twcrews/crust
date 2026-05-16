@@ -370,6 +370,52 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(renderingSource, /secondary \? " secondary" : ""/);
 	});
 
+	test('supports restoring persisted webview sessions after VS Code reloads', async () => {
+		const packageJson = JSON.parse(await readFile(resolve(__dirname, '..', '..', 'package.json'), 'utf8')) as { activationEvents?: string[] };
+		const extensionSource = await readFile(resolve(__dirname, '..', '..', 'src', 'extension.ts'), 'utf8');
+		const panelSource = await readFile(resolve(__dirname, '..', '..', 'src', 'ui', 'chatPanel.ts'), 'utf8');
+		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
+		const stateSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.state.js'), 'utf8');
+		const renderingSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
+
+		assert.ok(packageJson.activationEvents?.includes('onWebviewPanel:crustChat'));
+		assert.match(extensionSource, /CrustChatPanel\.registerSerializer\(context\)/);
+		assert.match(panelSource, /registerWebviewPanelSerializer\(CrustChatPanel\.viewType/);
+		assert.match(panelSource, /deserializeWebviewPanel: async \(panel, state(?:: unknown)?\) => \{[\s\S]*new CrustChatPanel\(context, panel, sessionPath\);/);
+		assert.match(panelSource, /switchSession\(this\.restoredSessionPath\)/);
+		assert.match(panelSource, /this\.post\(\{ type: 'sessionPath', sessionPath: this\.getSessionPath\(state\) \}\);/);
+		assert.match(mainSource, /if \(message\.type === "sessionPath"\) \{[\s\S]*updatePersistedWebviewState\(\{ sessionPath: message\.sessionPath \|\| undefined \}\);[\s\S]*\}/);
+		assert.match(stateSource, /let persistedWebviewState = vscode\.getState\(\) \|\| \{\};/);
+		assert.match(stateSource, /vscode\.setState\(persistedWebviewState\);/);
+		assert.match(renderingSource, /updatePersistedWebviewState\(\{ sessionTitle: title \}\);/);
+	});
+
+	test('focuses the prompt when the chat opens or is revealed', async () => {
+		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
+		const panelSource = await readFile(resolve(__dirname, '..', '..', 'src', 'ui', 'chatPanel.ts'), 'utf8');
+
+		assert.match(mainSource, /function focusPrompt\(\) \{\s*prompt\.focus\(\);\s*\}/);
+		assert.match(mainSource, /window\.setTimeout\(focusPrompt, 0\);[\s\S]*window\.setTimeout\(focusPrompt, 50\);/);
+		assert.match(mainSource, /focusPromptSoon\(\);[\s\S]*if \(message\.type === "focusPrompt"\) \{[\s\S]*focusPromptSoon\(\);/);
+		assert.match(panelSource, /CrustChatPanel\.currentPanel\.focusPrompt\(\);/);
+		assert.match(panelSource, /private focusPrompt\(\): void \{\s*this\.post\(\{ type: 'focusPrompt' \}\);\s*\}/);
+	});
+
+	test('renders copyable fenced code blocks with clipboard fallback', async () => {
+		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
+		const css = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.markdown.css'), 'utf8');
+
+		assert.match(source, /element\.append\(createCodeBlock\(codeLines\.join\("\\n"\)\)\);/);
+		assert.match(source, /button\.className = "markdown-code-copy";/);
+		assert.match(source, /button\.setAttribute\("aria-label", "Copy code block"\);/);
+		assert.match(source, /await copyTextToClipboard\(text\);/);
+		assert.match(source, /navigator\.clipboard[\s\S]*writeText\(text\)/);
+		assert.match(source, /document\.execCommand\("copy"\)/);
+		assert.match(source, /function createCopyIcon\(\)/);
+		assert.match(css, /\.markdown-code-block \{[\s\S]*position: relative;/);
+		assert.match(css, /\.markdown-code-copy\.copied \{[\s\S]*var\(--vscode-testing-iconPassed/);
+	});
+
 	test('injects nonce, CSP source, styles, scripts, and icon into the chat webview template', () => {
 		const extensionUri = vscode.Uri.file(resolve(__dirname, '..', '..'));
 		const webview = {
