@@ -150,6 +150,9 @@ window.addEventListener("message", (event) => {
 	if (message.type === "sessionTitle") {
 		setSessionTitle(message.title ?? "New Chat");
 	}
+	if (message.type === "sessionPath") {
+		updatePersistedWebviewState({ sessionPath: message.sessionPath || undefined });
+	}
 	if (message.type === "error") {
 		setStatus(message.message ?? "", true);
 	}

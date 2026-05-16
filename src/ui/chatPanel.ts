@@ -17,6 +17,7 @@ import { formatUsageStatus } from './usageStatus';
 const execFileAsync = promisify(execFile);
 
 export class CrustChatPanel implements vscode.Disposable {
+	private static readonly viewType = 'crustChat';
 	private static currentPanel: CrustChatPanel | undefined;
 	private readonly output = vscode.window.createOutputChannel('Crust');
 	private readonly disposables: vscode.Disposable[] = [];
@@ -43,6 +44,18 @@ export class CrustChatPanel implements vscode.Disposable {
 		void CrustChatPanel.open(context);
 	}
 
+	static registerSerializer(context: vscode.ExtensionContext): vscode.Disposable {
+		return vscode.window.registerWebviewPanelSerializer(CrustChatPanel.viewType, {
+			deserializeWebviewPanel: async (panel, state: unknown) => {
+				panel.webview.options = { enableScripts: true };
+				const sessionPath = typeof (state as { sessionPath?: unknown } | undefined)?.sessionPath === 'string'
+					? (state as { sessionPath: string }).sessionPath
+					: undefined;
+				CrustChatPanel.currentPanel = new CrustChatPanel(context, panel, sessionPath);
+			},
+		});
+	}
+
 	private static async open(context: vscode.ExtensionContext): Promise<void> {
 		if (CrustChatPanel.currentPanel) {
 			CrustChatPanel.currentPanel.panel.reveal(vscode.ViewColumn.Beside);
@@ -52,7 +65,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		const panel = vscode.window.createWebviewPanel(
-			'crustChat',
+			CrustChatPanel.viewType,
 			'Crust Chat',
 			vscode.ViewColumn.Beside,
 			{ enableScripts: true, retainContextWhenHidden: true },
@@ -66,6 +79,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	private constructor(
 		private readonly context: vscode.ExtensionContext,
 		private readonly panel: vscode.WebviewPanel,
+		private readonly restoredSessionPath?: string,
 	) {
 		this.cwd = this.getInitialCwd();
 		this.client = new PiRpcClient(this.cwd);
@@ -97,7 +111,9 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	dispose(): void {
 		this.log('Disposing chat panel');
-		CrustChatPanel.currentPanel = undefined;
+		if (CrustChatPanel.currentPanel === this) {
+			CrustChatPanel.currentPanel = undefined;
+		}
 		this.client.dispose();
 		while (this.disposables.length) {
 			this.disposables.pop()?.dispose();
@@ -131,22 +147,38 @@ export class CrustChatPanel implements vscode.Disposable {
 		try {
 			this.log('Initializing Pi RPC client');
 			await this.client.start();
-			const [models, state, messages, commands, builtinCommands] = await Promise.all([
+			const [models, initialState, commands, builtinCommands] = await Promise.all([
 				this.client.getAvailableModels(),
 				this.client.getState(),
-				this.client.getMessages(),
 				this.client.getCommands(),
 				this.getBuiltinSlashCommands(),
 			]);
+			let state = initialState;
+			if (this.restoredSessionPath && this.getSessionPath(state) !== this.restoredSessionPath) {
+				try {
+					this.log('Switching to restored webview session', { path: this.restoredSessionPath });
+					if (await this.client.switchSession(this.restoredSessionPath)) {
+						state = await this.client.getState();
+					}
+				} catch (error) {
+					this.log('Failed to switch to restored webview session', { error: error instanceof Error ? error.message : String(error), path: this.restoredSessionPath });
+				}
+			}
+			const messages = await this.client.getMessages();
 			this.models = models;
 			this.piSlashCommands = commands;
 			this.builtinSlashCommands = builtinCommands;
 			const currentModel = (state as { model?: Model | null } | undefined)?.model;
 			this.contextWindow = this.getModelContextWindow(currentModel);
+			this.post({ type: 'sessionPath', sessionPath: this.getSessionPath(state) });
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
 			this.post({ type: 'models', models, selected: currentModel ? this.modelKey(currentModel) : undefined });
 			this.postSlashCommands();
-			await this.postSessionStatus(messages);
+			if (this.restoredSessionPath && messages.length) {
+				await this.restoreMessages(messages);
+			} else {
+				await this.postSessionStatus(messages);
+			}
 			this.log('Initialized chat panel', { modelCount: models.length, messageCount: messages.length, commandCount: commands.length, contextWindow: this.contextWindow });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -206,6 +238,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.resetConversationState();
 			this.post({ type: 'clearMessages' });
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
+			await this.postCurrentSessionPath();
 			await this.postSessionStatus([]);
 			this.postIdeContext();
 			void this.refreshSlashCommands();
@@ -255,6 +288,12 @@ export class CrustChatPanel implements vscode.Disposable {
 
 		const messages = await this.client.getMessages();
 		this.log('Fetched session messages', { count: messages.length });
+		await this.restoreMessages(messages, session.name);
+		await this.postCurrentSessionPath();
+		void this.refreshSlashCommands();
+	}
+
+	private async restoreMessages(messages: unknown[], sessionName?: string): Promise<void> {
 		const restoredToolCalls = new Map<string, { elementId: string; name?: string; args?: unknown }>();
 		let firstUserMessage: string | undefined;
 		for (const message of messages) {
@@ -262,11 +301,10 @@ export class CrustChatPanel implements vscode.Disposable {
 			firstUserMessage ??= restoredFirstUserMessage;
 		}
 
-		const title = session.name ? extractRestoredPrompt(session.name).text : firstUserMessage || 'New Chat';
-		this.hasSessionTitle = Boolean(firstUserMessage || session.name);
+		const title = sessionName ? extractRestoredPrompt(sessionName).text : firstUserMessage || 'New Chat';
+		this.hasSessionTitle = Boolean(firstUserMessage || sessionName);
 		this.post({ type: 'sessionTitle', title: this.truncate(title, 50) });
 		await this.postSessionStatus(messages);
-		void this.refreshSlashCommands();
 	}
 
 	private resetConversationState(): void {
@@ -568,6 +606,14 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.post({ type: 'ideContext', label: ideContext?.label });
 	}
 
+	private async postCurrentSessionPath(): Promise<void> {
+		try {
+			this.post({ type: 'sessionPath', sessionPath: this.getSessionPath(await this.client.getState()) });
+		} catch (error) {
+			this.log('Failed to post current session path', { error: error instanceof Error ? error.message : String(error) });
+		}
+	}
+
 	private async submitPrompt(text: string, includeIdeContext: boolean, display?: { text?: string; slashCommandLabel?: string }): Promise<void> {
 		const trimmed = text.trim();
 		const displayText = display?.text ?? trimmed;
@@ -686,6 +732,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.activeTextMessageIds.clear();
 			this.removeActiveLoadingMessage();
 			void this.refreshUsageStatus();
+			void this.postCurrentSessionPath();
 			return;
 		}
 
@@ -988,6 +1035,11 @@ export class CrustChatPanel implements vscode.Disposable {
 	private getModelContextWindow(model: Model | null | undefined): number | undefined {
 		const contextWindow = (model as { contextWindow?: unknown } | null | undefined)?.contextWindow;
 		return typeof contextWindow === 'number' && Number.isFinite(contextWindow) ? contextWindow : undefined;
+	}
+
+	private getSessionPath(state: unknown): string | undefined {
+		const sessionFile = (state as { sessionFile?: unknown } | undefined)?.sessionFile;
+		return typeof sessionFile === 'string' ? sessionFile : undefined;
 	}
 
 	private createId(prefix: string): string {

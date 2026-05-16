@@ -1,6 +1,7 @@
 function setSessionTitle(title) {
 	sessionTitle.textContent = title;
 	sessionTitle.title = title;
+	updatePersistedWebviewState({ sessionTitle: title });
 }
 
 function setModels(models, selected) {

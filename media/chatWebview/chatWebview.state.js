@@ -1,4 +1,9 @@
 const vscode = acquireVsCodeApi();
+let persistedWebviewState = vscode.getState() || {};
+function updatePersistedWebviewState(update) {
+	persistedWebviewState = Object.assign({}, persistedWebviewState, update);
+	vscode.setState(persistedWebviewState);
+}
 const sessionTitle = document.getElementById("session-title");
 const messages = document.getElementById("messages");
 const messagesContent = document.getElementById("messages-content");
