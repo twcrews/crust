@@ -14,6 +14,15 @@ window.addEventListener("unhandledrejection", (event) => {
 logWebview("Chat webview loaded");
 setRandomEmptyStateFlavorText();
 
+function focusPrompt() {
+	prompt.focus();
+}
+
+function focusPromptSoon() {
+	window.setTimeout(focusPrompt, 0);
+	window.setTimeout(focusPrompt, 50);
+}
+
 form.addEventListener("submit", (event) => {
 	event.preventDefault();
 	const text = prompt.value;
@@ -112,6 +121,7 @@ jumpBottom.addEventListener("click", () => {
 messages.addEventListener("scroll", updateConversationNavButtons);
 updateEmptyState();
 updateConversationNavButtons();
+focusPromptSoon();
 
 window.addEventListener("message", (event) => {
 	const message = event.data;
@@ -124,6 +134,9 @@ window.addEventListener("message", (event) => {
 	}
 	if (message.type === "focusModel") {
 		model.focus();
+	}
+	if (message.type === "focusPrompt") {
+		focusPromptSoon();
 	}
 	if (message.type === "pathAutocomplete") {
 		setPathSuggestions(message.requestId, message.suggestions ?? []);

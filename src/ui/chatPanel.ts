@@ -47,6 +47,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		if (CrustChatPanel.currentPanel) {
 			CrustChatPanel.currentPanel.panel.reveal(vscode.ViewColumn.Beside);
 			await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
+			CrustChatPanel.currentPanel.focusPrompt();
 			return;
 		}
 
@@ -59,6 +60,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 		CrustChatPanel.currentPanel = new CrustChatPanel(context, panel);
 		await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
+		CrustChatPanel.currentPanel.focusPrompt();
 	}
 
 	private constructor(
@@ -922,6 +924,10 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private truncate(text: string, maxLength: number): string {
 		return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+	}
+
+	private focusPrompt(): void {
+		this.post({ type: 'focusPrompt' });
 	}
 
 	private setProcessing(isProcessing: boolean): void {
