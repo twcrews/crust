@@ -17,6 +17,9 @@
 .message.assistant pre:last-child,
 .user-message-body pre:last-child,
 .thinking-body pre:last-child,
+.message.assistant .markdown-code-block:last-child,
+.user-message-body .markdown-code-block:last-child,
+.thinking-body .markdown-code-block:last-child,
 .message.assistant hr:last-child,
 .user-message-body hr:last-child,
 .thinking-body hr:last-child,
@@ -69,17 +72,54 @@
 	font-size: 0.95em;
 	background: var(--vscode-textCodeBlock-background, var(--vscode-editor-inactiveSelectionBackground));
 }
-.message.assistant pre,
-.user-message-body pre,
-.thinking-body pre {
+.markdown-code-block {
+	position: relative;
 	box-sizing: border-box;
 	width: fit-content;
 	max-width: 100%;
 	margin: 0 0 0.75em;
+}
+.message.assistant pre,
+.user-message-body pre,
+.thinking-body pre {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 100%;
+	margin: 0;
 	padding: 10px;
 	overflow: auto;
 	border-radius: 6px;
 	background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));
+}
+.markdown-code-copy {
+	position: absolute;
+	top: 6px;
+	right: 6px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	color: var(--vscode-icon-foreground);
+	background: var(--vscode-button-secondaryBackground, var(--vscode-editor-background));
+	border: 1px solid var(--vscode-button-border, var(--vscode-sideBar-border));
+	border-radius: 4px;
+	opacity: 0;
+	cursor: pointer;
+	transition: opacity 0.12s ease, background-color 0.12s ease;
+}
+.markdown-code-block:hover .markdown-code-copy,
+.markdown-code-copy:focus-visible,
+.markdown-code-copy.copied {
+	opacity: 1;
+}
+.markdown-code-copy:hover,
+.markdown-code-copy:focus-visible {
+	background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
+}
+.markdown-code-copy.copied {
+	color: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
 }
 .message.assistant pre code,
 .user-message-body pre code,

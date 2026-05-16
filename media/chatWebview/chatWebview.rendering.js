@@ -260,11 +260,7 @@ function renderMarkdown(element, markdown) {
 			if (index < lines.length) {
 				index++;
 			}
-			const pre = document.createElement("pre");
-			const code = document.createElement("code");
-			code.textContent = codeLines.join("\n");
-			pre.append(code);
-			element.append(pre);
+			element.append(createCodeBlock(codeLines.join("\n")));
 			continue;
 		}
 
@@ -339,6 +335,88 @@ function renderMarkdown(element, markdown) {
 		index++;
 	}
 	flushParagraph();
+}
+
+function createCodeBlock(text) {
+	const wrapper = document.createElement("div");
+	wrapper.className = "markdown-code-block";
+
+	const pre = document.createElement("pre");
+	const code = document.createElement("code");
+	code.textContent = text;
+	pre.append(code);
+	wrapper.append(pre);
+
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "markdown-code-copy";
+	button.setAttribute("aria-label", "Copy code block");
+	button.title = "Copy code";
+	button.append(createCopyIcon());
+	button.addEventListener("click", async () => {
+		const copied = await copyTextToClipboard(text);
+		button.classList.toggle("copied", copied);
+		button.setAttribute("aria-label", copied ? "Copied code block" : "Copy code block");
+		button.title = copied ? "Copied" : "Copy code";
+		window.setTimeout(() => {
+			button.classList.remove("copied");
+			button.setAttribute("aria-label", "Copy code block");
+			button.title = "Copy code";
+		}, 1400);
+	});
+	wrapper.append(button);
+	return wrapper;
+}
+
+async function copyTextToClipboard(text) {
+	if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+		try {
+			await navigator.clipboard.writeText(text);
+			return true;
+		} catch (_error) {
+			// Fall back to a temporary textarea for webview environments without Clipboard API access.
+		}
+	}
+
+	const textarea = document.createElement("textarea");
+	textarea.value = text;
+	textarea.setAttribute("readonly", "");
+	textarea.style.position = "fixed";
+	textarea.style.opacity = "0";
+	document.body.append(textarea);
+	textarea.select();
+	try {
+		return document.execCommand("copy");
+	} finally {
+		textarea.remove();
+	}
+}
+
+function createCopyIcon() {
+	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	svg.setAttribute("aria-hidden", "true");
+	svg.setAttribute("width", "14");
+	svg.setAttribute("height", "14");
+	svg.setAttribute("viewBox", "0 0 16 16");
+	svg.setAttribute("fill", "none");
+
+	const back = document.createElementNS("http://www.w3.org/2000/svg", "path");
+	back.setAttribute("d", "M5.25 4.25V3.5C5.25 2.95 5.7 2.5 6.25 2.5H11.5C12.05 2.5 12.5 2.95 12.5 3.5V8.75C12.5 9.3 12.05 9.75 11.5 9.75H10.75");
+	back.setAttribute("stroke", "currentColor");
+	back.setAttribute("stroke-width", "1.2");
+	back.setAttribute("stroke-linejoin", "round");
+	svg.append(back);
+
+	const front = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+	front.setAttribute("x", "3.5");
+	front.setAttribute("y", "5.25");
+	front.setAttribute("width", "7.25");
+	front.setAttribute("height", "7.25");
+	front.setAttribute("rx", "1");
+	front.setAttribute("stroke", "currentColor");
+	front.setAttribute("stroke-width", "1.2");
+	svg.append(front);
+	return svg;
 }
 
 function isMarkdownDivider(line) {
