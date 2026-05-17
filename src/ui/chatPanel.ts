@@ -24,7 +24,9 @@ export class CrustChatPanel implements vscode.Disposable {
 	private readonly cwd: string | undefined;
 	private readonly client: PiRpcClient;
 	private models: Model[] = [];
+	private currentModel: Model | undefined;
 	private contextWindow: number | undefined;
+	private readonly notifiedErrors = new Set<string>();
 	private isProcessing = false;
 	private isStreaming = false;
 	private activeThinkingMessageId: string | undefined;
@@ -103,7 +105,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				}
 			}),
 			this.client.onEvent((event) => this.handlePiEvent(event)),
-			this.client.onError((message) => this.post({ type: 'error', message })),
+			this.client.onError((message) => this.handleClientError(message)),
 		);
 
 		void this.initialize();
@@ -169,6 +171,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.piSlashCommands = commands;
 			this.builtinSlashCommands = builtinCommands;
 			const currentModel = (state as { model?: Model | null } | undefined)?.model;
+			this.currentModel = currentModel ?? undefined;
 			this.contextWindow = this.getModelContextWindow(currentModel);
 			this.post({ type: 'sessionPath', sessionPath: this.getSessionPath(state) });
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
@@ -184,6 +187,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			const message = error instanceof Error ? error.message : String(error);
 			this.log('Failed to initialize chat panel', { error: message });
 			this.post({ type: 'error', message: `Unable to start Pi RPC: ${message}` });
+			if (this.isPiNotInstalledError(message)) {
+				this.showPiNotInstalledToast(message);
+			}
 		}
 	}
 
@@ -221,6 +227,65 @@ export class CrustChatPanel implements vscode.Disposable {
 				this.log(`Webview: ${message.message ?? ''}`, message.details);
 				break;
 		}
+	}
+
+	private handleClientError(message: string): void {
+		this.post({ type: 'error', message });
+		if (this.isPiNotInstalledError(message)) {
+			this.showPiNotInstalledToast(message);
+			return;
+		}
+		this.maybeShowModelConnectionToast(message);
+	}
+
+	private isPiNotInstalledError(message: string): boolean {
+		return /\bENOENT\b|spawn pi|command not found|not found/i.test(message);
+	}
+
+	private showPiNotInstalledToast(details: string): void {
+		const key = 'pi-not-installed';
+		if (this.notifiedErrors.has(key)) {
+			return;
+		}
+		this.notifiedErrors.add(key);
+		void vscode.window.showErrorMessage('Crust could not find the `pi` command. Install Pi Coding Agent or add it to your PATH.', 'Install Pi', 'Open Logs').then((action) => {
+			if (action === 'Install Pi') {
+				void vscode.env.openExternal(vscode.Uri.parse('https://pi.dev/'));
+			}
+			if (action === 'Open Logs') {
+				this.output.show();
+			}
+		});
+		this.log('Showing Pi not installed notification', { error: details });
+	}
+
+	private maybeShowModelConnectionToast(message: string): void {
+		if (!this.isModelConnectionError(message)) {
+			return;
+		}
+		const key = `model-connection:${this.currentModel ? this.modelKey(this.currentModel) : 'unknown'}:${message}`;
+		if (this.notifiedErrors.has(key)) {
+			return;
+		}
+		this.notifiedErrors.add(key);
+		const modelLabel = this.currentModel ? this.modelLabel(this.currentModel) : 'the selected model';
+		void vscode.window.showErrorMessage(`Crust could not connect to ${modelLabel}. ${message}`, 'Switch Model', 'Open Logs').then((action) => {
+			if (action === 'Switch Model') {
+				this.post({ type: 'focusModel' });
+			}
+			if (action === 'Open Logs') {
+				this.output.show();
+			}
+		});
+	}
+
+	private isModelConnectionError(message: string): boolean {
+		const text = message.toLowerCase();
+		const modelText = `${this.currentModel?.provider ?? ''} ${this.currentModel?.id ?? ''} ${this.currentModel?.name ?? ''}`.toLowerCase();
+		const mentionsProvider = /claude|anthropic/.test(text);
+		const selectedClaudeModel = /claude|anthropic/.test(modelText);
+		const looksLikeProviderFailure = /subscription|provider|credential|auth|login|connect|connection|rate limit|quota|billing|unavailable/.test(text);
+		return mentionsProvider || (selectedClaudeModel && looksLikeProviderFailure);
 	}
 
 	private async newChat(): Promise<void> {
@@ -643,9 +708,11 @@ export class CrustChatPanel implements vscode.Disposable {
 		try {
 			await this.client.prompt(promptText, this.isStreaming ? 'followUp' : undefined);
 		} catch (error) {
-			this.log('Prompt failed', { error: error instanceof Error ? error.message : String(error) });
+			const message = error instanceof Error ? error.message : String(error);
+			this.log('Prompt failed', { error: message });
 			const assistantMessageId = this.getStreamingTextMessageId(0);
-			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\nError: ${error instanceof Error ? error.message : String(error)}` });
+			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\nError: ${message}` });
+			this.maybeShowModelConnectionToast(message);
 			this.removeActiveLoadingMessage();
 			this.setProcessing(false);
 		}
@@ -702,10 +769,13 @@ export class CrustChatPanel implements vscode.Disposable {
 
 		try {
 			await this.client.setModel(model);
+			this.currentModel = model;
 			this.contextWindow = this.getModelContextWindow(model);
 			await this.postSessionStatus(await this.client.getMessages());
 		} catch (error) {
-			this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+			const message = error instanceof Error ? error.message : String(error);
+			this.post({ type: 'error', message });
+			this.maybeShowModelConnectionToast(message);
 		}
 	}
 
@@ -766,7 +836,9 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		if (assistantEvent?.type === 'error') {
-			this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(assistantEvent.contentIndex ?? 0), text: `\nError: ${assistantEvent.reason ?? 'unknown error'}` });
+			const message = assistantEvent.reason ?? 'unknown error';
+			this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(assistantEvent.contentIndex ?? 0), text: `\nError: ${message}` });
+			this.maybeShowModelConnectionToast(message);
 		}
 	}
 
