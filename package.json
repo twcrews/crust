@@ -29,6 +29,13 @@
         }
       }
     ],
+    "keybindings": [
+      {
+        "command": "crust.openChat",
+        "key": "cmd+ctrl+escape",
+        "mac": "cmd+ctrl+escape"
+      }
+    ],
     "menus": {
       "editor/title": [
         {
