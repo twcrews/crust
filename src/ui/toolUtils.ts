@@ -16,11 +16,22 @@ export function getToolPath(args: unknown): string | undefined {
 	return typeof path === 'string' ? path : undefined;
 }
 
-export function getToolHeaderDetail(toolName: string | undefined, args: unknown): string | undefined {
+export function getToolHeaderDetail(toolName: string | undefined, args: unknown, result?: RpcEvent['result']): string | undefined {
 	if (toolName === 'bash') {
 		return getBashCommand(args);
 	}
-	return getToolPath(args);
+
+	const path = getToolPath(args);
+	if (toolName !== 'read' || !path) {
+		return path;
+	}
+
+	if (isEntireFileRead(args, result)) {
+		return path;
+	}
+
+	const lineRange = getReadLineRange(args);
+	return lineRange ? `${path} ${lineRange}` : path;
 }
 
 export function getToolBody(toolName: string | undefined, args: unknown): string | undefined {
@@ -51,6 +62,54 @@ function getBashCommand(args: unknown): string | undefined {
 	}
 	const command = (args as { command?: unknown; cmd?: unknown }).command ?? (args as { cmd?: unknown }).cmd;
 	return typeof command === 'string' ? command : undefined;
+}
+
+function isEntireFileRead(args: unknown, result: RpcEvent['result'] | undefined): boolean {
+	if (typeof args !== 'object' || args === null) {
+		return true;
+	}
+
+	const record = args as { offset?: unknown; limit?: unknown };
+	const startLine = getPositiveInteger(record.offset) ?? 1;
+	if (record.limit === undefined) {
+		return startLine === 1;
+	}
+
+	if (startLine !== 1 || result === undefined) {
+		return false;
+	}
+
+	const truncation = result.details?.truncation;
+	if (typeof truncation === 'object' && truncation !== null && (truncation as { truncated?: unknown }).truncated === true) {
+		return false;
+	}
+
+	const text = getToolResultText(result);
+	return !text || !/(\bmore lines\b|Use offset=|Showing lines \d+-\d+ of \d+)/.test(text);
+}
+
+function getReadLineRange(args: unknown): string | undefined {
+	if (typeof args !== 'object' || args === null) {
+		return undefined;
+	}
+
+	const record = args as { offset?: unknown; limit?: unknown };
+	if (record.offset === undefined && record.limit === undefined) {
+		return undefined;
+	}
+
+	const startLine = getPositiveInteger(record.offset) ?? 1;
+	const limit = getPositiveInteger(record.limit);
+	if (limit === undefined) {
+		return `line ${startLine}`;
+	}
+
+	const endLine = startLine + limit - 1;
+	return endLine === startLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`;
+}
+
+function getPositiveInteger(value: unknown): number | undefined {
+	return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function getEditPreview(args: unknown): string | undefined {

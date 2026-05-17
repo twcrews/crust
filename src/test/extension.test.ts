@@ -186,6 +186,11 @@ suite('Tool utilities', () => {
 		assert.strictEqual(getToolPath({ file_path: 'src/b.ts' }), 'src/b.ts');
 		assert.strictEqual(getToolPath({ path: 1 }), undefined);
 		assert.strictEqual(getToolHeaderDetail('read', { path: 'src/a.ts' }), 'src/a.ts');
+		assert.strictEqual(getToolHeaderDetail('read', { path: 'src/a.ts', offset: 8, limit: 1 }), 'src/a.ts line 8');
+		assert.strictEqual(getToolHeaderDetail('read', { path: 'src/a.ts', offset: 55, limit: 17 }), 'src/a.ts lines 55-71');
+		assert.strictEqual(getToolHeaderDetail('read', { path: 'src/a.ts', limit: 10 }), 'src/a.ts lines 1-10');
+		assert.strictEqual(getToolHeaderDetail('read', { path: 'src/a.ts', limit: 10 }, { content: [{ type: 'text', text: 'entire file' }] }), 'src/a.ts');
+		assert.strictEqual(getToolHeaderDetail('read', { path: 'src/a.ts', limit: 10 }, { content: [{ type: 'text', text: 'partial\n\n[5 more lines in file. Use offset=11 to continue.]' }] }), 'src/a.ts lines 1-10');
 		assert.strictEqual(getToolHeaderDetail('bash', { command: 'npm test' }), 'npm test');
 		assert.strictEqual(getToolHeaderDetail('bash', { cmd: 'pnpm test' }), 'pnpm test');
 	});
