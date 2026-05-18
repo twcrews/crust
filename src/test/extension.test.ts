@@ -422,7 +422,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(source, /vscode\.postMessage\(\{ type: "cancel" \}\);/);
 		assert.match(source, /document\.addEventListener\("keydown", \(event\) => \{[\s\S]*event\.key\.toLowerCase\(\) !== "c"[\s\S]*!event\.ctrlKey[\s\S]*!piProcessing[\s\S]*hasCopyableSelection\(\)[\s\S]*requestCancelCurrentTask\("keyboard"\);/);
 		assert.match(source, /function hasCopyableSelection\(\) \{[\s\S]*prompt\.selectionStart !== prompt\.selectionEnd[\s\S]*window\.getSelection\(\);[\s\S]*!selection\.isCollapsed/);
-		assert.match(source, /if \(message\.type === "processing"\) \{[\s\S]*setProcessing\(message\.processing === true\);[\s\S]*\}/);
+		assert.match(source, /case "processing":\s*setProcessing\(message\.processing\);\s*break;/);
 		assert.match(renderingSource, /secondary \? " secondary" : ""/);
 	});
 
@@ -454,7 +454,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(panelSource, /deserializeWebviewPanel: async \(panel, state(?:: unknown)?\) => \{[\s\S]*new CrustChatPanel\(context, panel, sessionPath\);/);
 		assert.match(panelSource, /switchSession\(this\.restoredSessionPath\)/);
 		assert.match(panelSource, /const sessionPath = this\.getSessionPath\(state\);[\s\S]*this\.post\(\{ type: 'sessionPath', sessionPath \}\);/);
-		assert.match(mainSource, /if \(message\.type === "sessionPath"\) \{[\s\S]*updatePersistedWebviewState\(\{ sessionPath: message\.sessionPath \|\| undefined \}\);[\s\S]*\}/);
+		assert.match(mainSource, /case "sessionPath":\s*updatePersistedWebviewState\(\{ sessionPath: message\.sessionPath \|\| undefined \}\);\s*break;/);
 		assert.match(stateSource, /let persistedWebviewState = vscode\.getState\(\) \|\| \{\};/);
 		assert.match(stateSource, /vscode\.setState\(persistedWebviewState\);/);
 		assert.match(renderingSource, /updatePersistedWebviewState\(\{ sessionTitle: title \}\);/);
@@ -466,7 +466,7 @@ suite('Webview HTML and nonce generation', () => {
 
 		assert.match(mainSource, /function focusPrompt\(\) \{\s*prompt\.focus\(\);\s*\}/);
 		assert.match(mainSource, /window\.setTimeout\(focusPrompt, 0\);[\s\S]*window\.setTimeout\(focusPrompt, 50\);/);
-		assert.match(mainSource, /focusPromptSoon\(\);[\s\S]*if \(message\.type === "focusPrompt"\) \{[\s\S]*focusPromptSoon\(\);/);
+		assert.match(mainSource, /focusPromptSoon\(\);[\s\S]*case "focusPrompt":\s*focusPromptSoon\(\);/);
 		assert.match(panelSource, /const chatPanel = new CrustChatPanel\(context, panel\);[\s\S]*chatPanel\.focusPrompt\(\);/);
 		assert.doesNotMatch(panelSource, /currentPanel/);
 		assert.match(panelSource, /private focusPrompt\(\): void \{\s*this\.post\(\{ type: 'focusPrompt' \}\);\s*\}/);
