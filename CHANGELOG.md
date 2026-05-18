@@ -4,6 +4,11 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.6.1] - 2026-05-18
+
+- Fixed false-positive model error notifications from normal streamed assistant text.
+- Updated agent guidance for current error-notification behavior.
+
 ## [0.6.0] - 2026-05-18
 
 - Added support for multiple concurrent Crust chat instances, including restored session paths per tab.
@@ -64,6 +69,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.6.1]: https://github.com/twcrews/crust/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/twcrews/crust/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/twcrews/crust/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/twcrews/crust/compare/0.3.0...0.4.0
