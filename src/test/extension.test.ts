@@ -6,8 +6,12 @@ import { runInNewContext } from 'node:vm';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
 import { isRpcEvent, isRpcResponse, isSlashCommand, isToolResult, normalizeSlashCommand } from '../pi/rpcTypes';
+import { formatErrorForChat, getAssistantErrorMessage, getLastModelFromSessionText } from '../ui/chatPanelUtils';
+import { createConversationState } from '../ui/conversationState';
 import { buildPromptWithIdeContext, extractRestoredPrompt, formatSelectionRange, getIdeContext } from '../ui/ideContext';
 import { getMessageContent, getBlockText, getBlockType, getEntryTimestamp, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from '../ui/messageUtils';
+import { restoreSessionMessages } from '../ui/sessionRestoreRenderer';
+import { StreamingEventRenderer } from '../ui/streamingEventRenderer';
 import { getPathSuggestions } from '../ui/pathAutocomplete';
 import { listSessions } from '../ui/sessionHistory';
 import { getChatWebviewHtml } from '../ui/chatWebview';
@@ -31,6 +35,8 @@ suite('RPC type guards', () => {
 		assert.strictEqual(isRpcEvent({ type: 'assistant_message', assistantMessageEvent: { type: 'delta' } }), false);
 		assert.strictEqual(isRpcEvent({ type: 'model_select', model: { id: 'missing provider' } }), false);
 		assert.strictEqual(isRpcEvent({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 42 } }), false);
+		assert.strictEqual(isRpcEvent({ type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: 'provider failed' } }), true);
+		assert.strictEqual(isRpcEvent({ type: 'message_end', message: 'not a message' }), false);
 		assert.strictEqual(isRpcEvent({ type: 42 }), false);
 		assert.strictEqual(isRpcEvent(undefined), false);
 	});
@@ -154,6 +160,120 @@ suite('Message utilities', () => {
 		assert.strictEqual(parseJsonObject('not-json'), undefined);
 		assert.strictEqual(getEntryTimestamp({ timestamp: '2024-01-02T03:04:05.000Z' }), Date.UTC(2024, 0, 2, 3, 4, 5));
 		assert.strictEqual(getEntryTimestamp({ timestamp: 'invalid' }), undefined);
+	});
+});
+
+suite('Chat panel helpers', () => {
+	test('pretty-prints JSON provider errors for chat', () => {
+		assert.strictEqual(formatErrorForChat('plain failure'), 'Error: plain failure');
+		assert.strictEqual(formatErrorForChat('provider failed {"error":{"message":"quota","code":429}}'), [
+			'Error: provider failed',
+			'',
+			'```json',
+			'{',
+			'  "error": {',
+			'    "message": "quota",',
+			'    "code": 429',
+			'  }',
+			'}',
+			'```',
+		].join('\n'));
+	});
+
+	test('detects explicit assistant errors without scanning arbitrary text', () => {
+		assert.strictEqual(getAssistantErrorMessage({ role: 'assistant', content: 'Error: harmless text' }), undefined);
+		assert.strictEqual(getAssistantErrorMessage({ role: 'assistant', stopReason: 'error', errorMessage: 'provider failed' }), 'provider failed');
+		assert.strictEqual(getAssistantErrorMessage({ role: 'assistant', stopReason: 'error' }), 'Unknown error');
+		assert.strictEqual(getAssistantErrorMessage({ role: 'user', stopReason: 'error', errorMessage: 'ignore' }), undefined);
+	});
+
+	test('reads the latest model from model changes and assistant session messages', () => {
+		const knownModel = { provider: 'anthropic', id: 'claude-4', name: 'Claude 4' };
+		const sessionText = [
+			JSON.stringify({ type: 'model_change', provider: 'openai', modelId: 'gpt-5' }),
+			JSON.stringify({ type: 'message', message: { role: 'assistant', provider: 'anthropic', model: 'claude-4', content: 'hello' } }),
+		].join('\n');
+
+		assert.deepStrictEqual(getLastModelFromSessionText(sessionText, [knownModel]), knownModel);
+		assert.deepStrictEqual(getLastModelFromSessionText('{"type":"model_change","provider":"x","modelId":"y"}', []), { provider: 'x', id: 'y' });
+	});
+});
+
+suite('Streaming event renderer', () => {
+	function createRenderer() {
+		const state = createConversationState();
+		const posts: unknown[] = [];
+		const processing: boolean[] = [];
+		const finalizedUsage: unknown[] = [];
+		const callbacks = {
+			post: (message: unknown) => posts.push(message),
+			setProcessing: (isProcessing: boolean) => processing.push(isProcessing),
+			setCurrentModel: () => undefined,
+			finalizeUsageStatus: (message: unknown) => finalizedUsage.push(message),
+			postCurrentUsageStatus: () => posts.push({ type: 'usage' }),
+			postCurrentSessionPath: () => posts.push({ type: 'sessionPath' }),
+			refreshCurrentModel: () => posts.push({ type: 'refreshModel' }),
+		};
+		return { state, posts, processing, finalizedUsage, renderer: new StreamingEventRenderer(state, callbacks) };
+	}
+
+	test('renders provider failures from message_end events', () => {
+		const { renderer, posts, finalizedUsage } = createRenderer();
+		const message = { role: 'assistant', stopReason: 'error', errorMessage: 'provider failed {"status":500}' };
+
+		renderer.handlePiEvent({ type: 'message_end', message });
+
+		assert.deepStrictEqual(posts[0], { type: 'addMessage', id: (posts[0] as { id: string }).id, role: 'assistant', text: '' });
+		assert.deepStrictEqual(posts[1], { type: 'appendMessage', id: (posts[0] as { id: string }).id, text: '\nError: provider failed\n\n```json\n{\n  "status": 500\n}\n```', error: true });
+		assert.deepStrictEqual(finalizedUsage, [message]);
+	});
+
+	test('does not duplicate assistant errors across update and end events', () => {
+		const { renderer, posts } = createRenderer();
+		const message = { role: 'assistant', stopReason: 'error', errorMessage: 'first failure' };
+
+		renderer.handlePiEvent({ type: 'message_update', message, assistantMessageEvent: { type: 'error', reason: 'fallback', contentIndex: 0 } });
+		renderer.handlePiEvent({ type: 'agent_end', message });
+
+		assert.strictEqual(posts.filter((post) => (post as { type?: string }).type === 'appendMessage').length, 1);
+		assert.ok(posts.some((post) => (post as { type?: string }).type === 'sessionPath'));
+		assert.ok(posts.some((post) => (post as { type?: string }).type === 'refreshModel'));
+	});
+
+	test('renders abort indicators and clears streaming state on agent end', () => {
+		const { renderer, state, posts, processing } = createRenderer();
+		state.activeToolCallIds.set('id:old', 'tool-old');
+
+		renderer.handlePiEvent({ type: 'agent_start' });
+		renderer.handlePiEvent({ type: 'agent_end', message: { role: 'assistant', stopReason: 'aborted', errorMessage: 'Stopped by user' } });
+
+		assert.deepStrictEqual(processing, [true, false]);
+		assert.strictEqual(state.isStreaming, false);
+		assert.strictEqual(state.activeToolCallIds.size, 0);
+		assert.ok(posts.some((post) => (post as { text?: string; secondary?: boolean }).text === '_Stopped by user_' && (post as { secondary?: boolean }).secondary));
+	});
+});
+
+suite('Session restore rendering', () => {
+	test('restores text, thinking, tool calls, results, slash labels, and aborts', () => {
+		const posts: unknown[] = [];
+		const result = restoreSessionMessages([
+			{ role: 'user', content: '/compact' },
+			{ role: 'assistant', content: [
+				{ type: 'thinking', thinking: 'considering' },
+				{ type: 'text', text: 'Answer' },
+				{ type: 'toolCall', id: 'call-1', name: 'edit', arguments: { path: 'src/a.ts', edits: [{ oldText: 'old', newText: 'new' }] } },
+			] },
+			{ role: 'toolResult', toolCallId: 'call-1', toolName: 'edit', details: { diff: '--- a\n+++ b' } },
+			{ role: 'assistant', stopReason: 'aborted', errorMessage: 'Interrupted', content: '' },
+		], undefined, (message) => posts.push(message), (text) => text === '/compact' ? '/compact' : undefined);
+
+		assert.deepStrictEqual(result, { title: '/compact', hasSessionTitle: true });
+		assert.ok(posts.some((post) => (post as { slashCommandLabel?: string }).slashCommandLabel === '/compact'));
+		assert.ok(posts.some((post) => (post as { type?: string }).type === 'addThinking'));
+		assert.ok(posts.some((post) => (post as { type?: string; text?: string }).type === 'addMessage' && (post as { text?: string }).text === 'Answer'));
+		assert.ok(posts.some((post) => (post as { type?: string; status?: string; isDiff?: boolean }).type === 'upsertTool' && (post as { status?: string }).status === 'done' && (post as { isDiff?: boolean }).isDiff));
+		assert.ok(posts.some((post) => (post as { text?: string; secondary?: boolean }).text === '_Interrupted_' && (post as { secondary?: boolean }).secondary));
 	});
 });
 
@@ -453,7 +573,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(panelSource, /registerWebviewPanelSerializer\(CrustChatPanel\.viewType/);
 		assert.match(panelSource, /deserializeWebviewPanel: async \(panel, state(?:: unknown)?\) => \{[\s\S]*new CrustChatPanel\(context, panel, sessionPath\);/);
 		assert.match(panelSource, /switchSession\(this\.restoredSessionPath\)/);
-		assert.match(panelSource, /const sessionPath = this\.getSessionPath\(state\);[\s\S]*this\.post\(\{ type: 'sessionPath', sessionPath \}\);/);
+		assert.match(panelSource, /const sessionPath = getSessionPath\(state\);[\s\S]*this\.post\(\{ type: 'sessionPath', sessionPath \}\);/);
 		assert.match(mainSource, /case "sessionPath":\s*updatePersistedWebviewState\(\{ sessionPath: message\.sessionPath \|\| undefined \}\);\s*break;/);
 		assert.match(stateSource, /let persistedWebviewState = vscode\.getState\(\) \|\| \{\};/);
 		assert.match(stateSource, /vscode\.setState\(persistedWebviewState\);/);
