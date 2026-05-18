@@ -310,10 +310,10 @@ export class CrustChatPanel implements vscode.Disposable {
 	private isModelConnectionError(message: string): boolean {
 		const text = message.toLowerCase();
 		const modelText = `${this.currentModel?.provider ?? ''} ${this.currentModel?.id ?? ''} ${this.currentModel?.name ?? ''}`.toLowerCase();
-		const mentionsProvider = /claude|anthropic/.test(text);
-		const selectedClaudeModel = /claude|anthropic/.test(modelText);
-		const looksLikeProviderFailure = /subscription|provider|credential|auth|login|connect|connection|rate limit|quota|billing|unavailable|usage|token|http\s*400|\b400\b|bad request/.test(text);
-		return mentionsProvider || (selectedClaudeModel && looksLikeProviderFailure);
+		const mentionsProvider = /\b(?:claude|anthropic|openai|codex)\b/.test(text);
+		const selectedKnownProvider = /\b(?:claude|anthropic|openai|codex)\b/.test(modelText);
+		const looksLikeProviderFailure = /subscription|provider|credential|auth(?:entication|orization)?|login|connect(?:ion)?|rate limit|quota|billing|unavailable|usage limit|token|http\s*4\d\d|http\s*5\d\d|\b4\d\d\b|\b5\d\d\b|bad request|unauthorized|forbidden/.test(text);
+		return looksLikeProviderFailure && (mentionsProvider || selectedKnownProvider);
 	}
 
 	private async newChat(): Promise<void> {
@@ -930,7 +930,6 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private handlePiEvent(event: RpcEvent): void {
-		this.maybeShowModelErrorFromValue(event);
 		if (event.type === 'model_select' && event.model) {
 			this.setCurrentModel(event.model);
 			return;
@@ -1013,67 +1012,14 @@ export class CrustChatPanel implements vscode.Disposable {
 		if (typeof message !== 'object' || message === null) {
 			return undefined;
 		}
-		const record = message as { errorMessage?: unknown; error?: unknown; reason?: unknown; message?: unknown; stopReason?: unknown };
+		const record = message as { errorMessage?: unknown; error?: unknown; reason?: unknown; stopReason?: unknown };
 		const errorMessage = typeof record.errorMessage === 'string' ? record.errorMessage : undefined;
 		const error = typeof record.error === 'string' ? record.error : undefined;
 		const reason = typeof record.reason === 'string' ? record.reason : undefined;
-		const nestedMessage = typeof record.message === 'string' ? record.message : undefined;
 		if (record.stopReason === 'aborted' && errorMessage === 'Request was aborted') {
 			return undefined;
 		}
-		return errorMessage || error || reason || nestedMessage;
-	}
-
-	private maybeShowModelErrorFromValue(value: unknown): void {
-		const message = this.findModelErrorMessage(value);
-		if (message) {
-			this.maybeShowModelConnectionToast(message);
-		}
-	}
-
-	private findModelErrorMessage(value: unknown, seen = new WeakSet<object>(), depth = 0): string | undefined {
-		if (depth > 5 || value === undefined || value === null) {
-			return undefined;
-		}
-
-		if (typeof value === 'string') {
-			return this.isModelConnectionError(value) ? value : undefined;
-		}
-
-		if (typeof value !== 'object') {
-			return undefined;
-		}
-
-		if (seen.has(value)) {
-			return undefined;
-		}
-		seen.add(value);
-
-		const direct = this.getAssistantErrorMessage(value);
-		if (direct && this.isModelConnectionError(direct)) {
-			return direct;
-		}
-
-		if (Array.isArray(value)) {
-			for (const item of value) {
-				const found = this.findModelErrorMessage(item, seen, depth + 1);
-				if (found) {
-					return found;
-				}
-			}
-			return undefined;
-		}
-
-		for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-			if (!/error|reason|message|content|assistantMessageEvent|partial/i.test(key)) {
-				continue;
-			}
-			const found = this.findModelErrorMessage(child, seen, depth + 1);
-			if (found) {
-				return found;
-			}
-		}
-		return undefined;
+		return errorMessage || error || reason;
 	}
 
 	private isAbortedAssistantMessage(message: unknown): boolean {
