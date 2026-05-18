@@ -13,13 +13,14 @@ The project has a real implementation rather than only VS Code template code. Th
 - `src/extension.ts` contains extension activation and command registration only.
 - `src/pi/piRpcClient.ts` owns the Pi RPC child process, JSONL request/response handling, event forwarding, supported RPC commands (`prompt`, `steer`, abort, model/session changes, compact, slash command discovery), and RPC logging.
 - `src/pi/rpcTypes.ts` contains lightweight runtime guards and shared Pi RPC types, including typed tool result/event shapes.
-- `src/ui/chatPanel.ts` coordinates each VS Code webview panel, Pi RPC client, session restore/new chat, model/status/usage updates, IDE context injection, slash commands, `@` path autocomplete, streaming messages, thinking blocks, task cancellation/steering, tool cards/diffs, and targeted model-connection error notifications.
+- `src/ui/chatPanel.ts` coordinates each VS Code webview panel, Pi RPC client, session restore/new chat, model/status/usage updates, IDE context injection, slash commands, `@` path autocomplete, task cancellation/steering, tool cards/diffs, and targeted model-connection error notifications.
+- `src/ui/streamingEventRenderer.ts`, `sessionRestoreRenderer.ts`, `conversationState.ts`, `slashCommands.ts`, and `chatPanelUtils.ts` contain the split-out rendering, session replay, conversation state, slash command, and panel utility logic that keeps `chatPanel.ts` focused.
 - `src/ui/chatTypes.ts`, `ideContext.ts`, `messageUtils.ts`, `pathAutocomplete.ts`, `sessionHistory.ts`, `toolUtils.ts`, and `usageStatus.ts` hold focused UI-side parsing, formatting, session, filesystem, and tool helpers.
 - `src/ui/chatWebview.ts` loads the static webview template and injects CSP nonce/resource URIs.
 - `src/utils/crustLogger.ts`, `errorMessage.ts`, and `nonce.ts` provide output-channel logging, error stringification, and CSP nonce generation.
 - `media/chatWebview.html` and the plain CSS/JavaScript files under `media/chatWebview/` implement the webview UI. The webview scripts are syntax-checked separately; they handle manual markdown rendering, copyable code blocks, inline diff rendering, slash and path autocomplete, IDE context toggling, persisted webview state, prompt history recall, cancellation shortcuts, empty states, conversation navigation, and logging back to the extension.
 - `branding/` contains extension and webview icons.
-- `src/test/extension.test.ts` contains the VS Code integration/unit test suite for RPC guards, webview message validation, IDE context, tool utilities, usage formatting, path autocomplete, session history, and static webview behavior.
+- `src/test/extension.test.ts` contains the VS Code integration/unit test suite for RPC guards/client behavior, webview message validation, chat panel helpers, streaming rendering, session restore rendering, IDE context, tool utilities, usage formatting, path autocomplete, session history, and static webview behavior.
 - `.github/workflows/ci.yml` runs CI validation; `.github/dependabot.yml` manages dependency update PRs.
 
 ## Working guidelines
