@@ -36,4 +36,10 @@ export async function getBuiltinSlashCommands(log: LogFn): Promise<SlashCommand[
 	}
 }
 
-const fallbackCommands: SlashCommand[] = [{ name: 'new', description: 'Start a new session', source: 'builtin' }];
+const fallbackCommands: SlashCommand[] = [
+	{ name: 'new', description: 'Start a new session', source: 'builtin' },
+	{ name: 'compact', description: 'Manually compact context, optional custom instructions', source: 'builtin' },
+	{ name: 'name', description: 'Set the session name', source: 'builtin' },
+	{ name: 'resume', description: 'Resume a previous session', source: 'builtin' },
+	{ name: 'model', description: 'Select model', source: 'builtin' },
+];

@@ -266,6 +266,7 @@ suite('Session restore rendering', () => {
 			] },
 			{ role: 'toolResult', toolCallId: 'call-1', toolName: 'edit', details: { diff: '--- a\n+++ b' } },
 			{ role: 'assistant', stopReason: 'aborted', errorMessage: 'Interrupted', content: '' },
+			{ role: 'compactionSummary', summary: 'Short summary\n\n---\n\nFull details', tokensBefore: 12000 },
 		], undefined, (message) => posts.push(message), (text) => text === '/compact' ? '/compact' : undefined);
 
 		assert.deepStrictEqual(result, { title: '/compact', hasSessionTitle: true });
@@ -274,6 +275,7 @@ suite('Session restore rendering', () => {
 		assert.ok(posts.some((post) => (post as { type?: string; text?: string }).type === 'addMessage' && (post as { text?: string }).text === 'Answer'));
 		assert.ok(posts.some((post) => (post as { type?: string; status?: string; isDiff?: boolean }).type === 'upsertTool' && (post as { status?: string }).status === 'done' && (post as { isDiff?: boolean }).isDiff));
 		assert.ok(posts.some((post) => (post as { text?: string; secondary?: boolean }).text === '_Interrupted_' && (post as { secondary?: boolean }).secondary));
+		assert.ok(posts.some((post) => (post as { compaction?: boolean; text?: string }).compaction === true && (post as { text?: string }).text?.includes('12k tokens summarized')));
 	});
 });
 
@@ -510,6 +512,18 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(source, /slashCommandLabel\.startsWith\("\/skill:"\) \? "Skill: " \+ slashCommandLabel\.slice\(7\) : "Slash command: " \+ slashCommandLabel/);
 		assert.match(source, /if \(text\) \{[\s\S]*setMarkdownContent\(body, text\);[\s\S]*\}/);
 		assert.match(source, /element\.classList\.contains\("user"\)[\s\S]*setMarkdownContent\(body, \(body\.dataset\.markdown \?\? ""\) \+ text\);[\s\S]*initUserMessageToggle\(element\);/);
+	});
+
+	test('renders compaction messages as expandable shaded bubbles with first-line previews', async () => {
+		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
+		const css = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.messages.css'), 'utf8');
+		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
+
+		assert.match(mainSource, /addMessage\(message\.id[\s\S]*message\.compaction === true\);/);
+		assert.match(source, /function renderCompactionMessage\(element, text\)[\s\S]*setMarkdownContent\(body, previewText \|\| fullText\);[\s\S]*Show full compaction/);
+		assert.match(source, /function getCompactionPreviewText\(markdown\) \{\s*return markdown\.replace\(\/\\r\\n\/g, "\\n"\)\.split\("\\n", 1\)\[0\]\.trim\(\);\s*\}/);
+		assert.match(css, /\.message\.compaction-message \{[\s\S]*border-radius: 10px;[\s\S]*background: var\(--vscode-editor-inactiveSelectionBackground\);/);
+		assert.match(css, /\.compaction-toggle \{/);
 	});
 
 	test('renders tool headers with a dedicated tool name element and title text', async () => {

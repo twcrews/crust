@@ -25,11 +25,13 @@ function setModels(models, selected) {
 	}
 }
 
-function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel, secondary, error) {
+function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel, secondary, error, compaction) {
 	const element = document.createElement("div");
 	element.id = id;
-	element.className = "message " + role + (loading ? " loading" : "") + (secondary ? " secondary" : "") + (error ? " error-message" : "");
-	if (role === "assistant" && !loading) {
+	element.className = "message " + role + (loading ? " loading" : "") + (secondary ? " secondary" : "") + (error ? " error-message" : "") + (compaction ? " compaction-message" : "");
+	if (role === "assistant" && compaction && !loading) {
+		renderCompactionMessage(element, text);
+	} else if (role === "assistant" && !loading) {
 		setMarkdownContent(element, text);
 	} else if (role === "user") {
 		renderUserMessage(element, text, ideContextLabel, slashCommandLabel);
@@ -43,6 +45,37 @@ function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel,
 	updateEmptyState();
 	keepLoadingAtBottom();
 	finishContentUpdate();
+}
+
+function renderCompactionMessage(element, text) {
+	const fullText = text.trim();
+	const previewText = getCompactionPreviewText(fullText);
+	const body = document.createElement("div");
+	body.className = "compaction-body";
+	setMarkdownContent(body, previewText || fullText);
+	element.append(body);
+
+	if (!previewText || previewText === fullText) {
+		return;
+	}
+
+	const toggle = document.createElement("button");
+	toggle.type = "button";
+	toggle.className = "compaction-toggle";
+	toggle.textContent = "Show full compaction";
+	toggle.setAttribute("aria-expanded", "false");
+	toggle.addEventListener("click", () => {
+		const expanded = element.classList.toggle("expanded");
+		toggle.textContent = expanded ? "Show less" : "Show full compaction";
+		toggle.setAttribute("aria-expanded", String(expanded));
+		setMarkdownContent(body, expanded ? fullText : previewText);
+		finishContentUpdate();
+	});
+	element.append(toggle);
+}
+
+function getCompactionPreviewText(markdown) {
+	return markdown.replace(/\r\n/g, "\n").split("\n", 1)[0].trim();
 }
 
 function renderUserMessage(element, text, ideContextLabel, slashCommandLabel) {

@@ -89,8 +89,9 @@ export class PiRpcClient implements vscode.Disposable {
 		return !data?.cancelled;
 	}
 
-	async compact(customInstructions?: string): Promise<void> {
-		await this.send({ type: 'compact', ...(customInstructions ? { customInstructions } : {}) });
+	async compact(customInstructions?: string): Promise<unknown> {
+		const response = await this.send({ type: 'compact', ...(customInstructions ? { customInstructions } : {}) });
+		return response.data;
 	}
 
 	async setSessionName(name: string): Promise<void> {

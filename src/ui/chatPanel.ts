@@ -409,8 +409,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				await this.newChat();
 				return;
 			case 'compact':
-				await this.client.compact(args || undefined);
-				await this.postSessionStatus(await this.client.getMessages());
+				await this.compactSession(commandText.trim() || '/compact', args || undefined);
 				return;
 			case 'name':
 				await this.client.setSessionName(args);
@@ -425,6 +424,48 @@ export class CrustChatPanel implements vscode.Disposable {
 			default:
 				this.postError(`/${commandName} is a Pi TUI command and is not available in Crust yet.`);
 		}
+	}
+
+	private async compactSession(invocation: string, customInstructions: string | undefined): Promise<void> {
+		this.log('Compacting session', { customInstructions: Boolean(customInstructions) });
+		if (!this.conversationState.hasSessionTitle) {
+			this.setSessionTitleFromPrompt(invocation);
+		}
+
+		this.conversationState.activeLoadingMessageId = createId('loading');
+		this.conversationState.activeTextMessageIds.clear();
+		this.conversationState.activeAbortIndicatorShown = false;
+		this.conversationState.activeErrorMessageShown = false;
+		this.post({ type: 'addMessage', id: createId('user'), role: 'user', text: '', slashCommandLabel: invocation });
+		this.post({ type: 'addMessage', id: this.conversationState.activeLoadingMessageId, role: 'assistant', text: '', loading: true });
+		this.setProcessing(true);
+		this.post({ type: 'status', message: 'Compacting context...' });
+
+		try {
+			const result = await this.client.compact(customInstructions);
+			this.removeActiveLoadingMessage();
+			this.postCompactionResult(result);
+			await this.postSessionStatus(await this.client.getMessages());
+			await this.postCurrentSessionPath();
+		} catch (error) {
+			this.removeActiveLoadingMessage();
+			this.postError(errorMessage(error), { operation: 'compactSession' });
+		} finally {
+			this.setProcessing(false);
+			resetStreamingState(this.conversationState);
+			void this.refreshCurrentModel();
+			void this.refreshSlashCommands();
+		}
+	}
+
+	private postCompactionResult(result: unknown): void {
+		const record = typeof result === 'object' && result !== null ? result as { summary?: unknown; tokensBefore?: unknown } : undefined;
+		const summary = typeof record?.summary === 'string' ? record.summary.trim() : '';
+		const tokensBefore = typeof record?.tokensBefore === 'number' && Number.isFinite(record.tokensBefore)
+			? ` (${Math.round(record.tokensBefore / 1000)}k tokens summarized)`
+			: '';
+		const text = summary ? `Context compacted${tokensBefore}.\n\n${summary}` : `Context compacted${tokensBefore}.`;
+		this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text, secondary: true, compaction: true });
 	}
 
 	private postCurrentUsageStatus(): void {

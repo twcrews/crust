@@ -59,11 +59,28 @@ function restoreMessage(
 		return undefined;
 	}
 
+	if (role === 'compactionSummary') {
+		restoreCompactionSummary(message, post);
+		return undefined;
+	}
+
 	const text = getMessageText(message).trim();
 	if (text) {
 		post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text });
 	}
 	return undefined;
+}
+
+function restoreCompactionSummary(message: unknown, post: PostFn): void {
+	const record = typeof message === 'object' && message !== null ? message as { summary?: unknown; tokensBefore?: unknown } : undefined;
+	const summary = typeof record?.summary === 'string' ? record.summary.trim() : '';
+	if (!summary) {
+		return;
+	}
+	const tokensBefore = typeof record?.tokensBefore === 'number' && Number.isFinite(record.tokensBefore)
+		? ` (${Math.round(record.tokensBefore / 1000)}k tokens summarized)`
+		: '';
+	post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: `Context compacted${tokensBefore}.\n\n${summary}`, secondary: true, compaction: true });
 }
 
 function restoreAssistantMessage(message: unknown, toolCalls: Map<string, RestoredToolCall>, post: PostFn): void {

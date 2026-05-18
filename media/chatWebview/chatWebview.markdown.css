@@ -1,31 +1,39 @@
 .message.assistant,
 .user-message-body,
-.thinking-body {
+.thinking-body,
+.compaction-body {
 	white-space: normal;
 }
 .message.assistant p,
 .user-message-body p,
-.thinking-body p {
+.thinking-body p,
+.compaction-body p {
 	margin: 0 0 0.75em;
 }
 .message.assistant p:last-child,
 .user-message-body p:last-child,
 .thinking-body p:last-child,
+.compaction-body p:last-child,
 .message.assistant ul:last-child,
 .user-message-body ul:last-child,
 .thinking-body ul:last-child,
+.compaction-body ul:last-child,
 .message.assistant pre:last-child,
 .user-message-body pre:last-child,
 .thinking-body pre:last-child,
+.compaction-body pre:last-child,
 .message.assistant .markdown-code-block:last-child,
 .user-message-body .markdown-code-block:last-child,
 .thinking-body .markdown-code-block:last-child,
+.compaction-body .markdown-code-block:last-child,
 .message.assistant hr:last-child,
 .user-message-body hr:last-child,
 .thinking-body hr:last-child,
+.compaction-body hr:last-child,
 .message.assistant .markdown-table-wrapper:last-child,
 .user-message-body .markdown-table-wrapper:last-child,
-.thinking-body .markdown-table-wrapper:last-child {
+.thinking-body .markdown-table-wrapper:last-child,
+.compaction-body .markdown-table-wrapper:last-child {
 	margin-bottom: 0;
 }
 .message.assistant h1,
@@ -45,27 +53,36 @@
 .thinking-body h3,
 .thinking-body h4,
 .thinking-body h5,
-.thinking-body h6 {
+.thinking-body h6,
+.compaction-body h1,
+.compaction-body h2,
+.compaction-body h3,
+.compaction-body h4,
+.compaction-body h5,
+.compaction-body h6 {
 	margin: 0 0 0.6em;
 	font-size: 1em;
 	font-weight: 600;
 }
 .message.assistant ul,
 .user-message-body ul,
-.thinking-body ul {
+.thinking-body ul,
+.compaction-body ul {
 	margin: 0 0 0.75em;
 	padding-left: 1.4em;
 }
 .message.assistant blockquote,
 .user-message-body blockquote,
-.thinking-body blockquote {
+.thinking-body blockquote,
+.compaction-body blockquote {
 	margin: 0 0 0.75em;
 	padding-left: 10px;
 	color: var(--vscode-descriptionForeground);
 }
 .message.assistant code,
 .user-message-body code,
-.thinking-body code {
+.thinking-body code,
+.compaction-body code {
 	padding: 0.1em 0.3em;
 	border-radius: 3px;
 	font-family: var(--vscode-editor-font-family, monospace);
@@ -81,7 +98,8 @@
 }
 .message.assistant pre,
 .user-message-body pre,
-.thinking-body pre {
+.thinking-body pre,
+.compaction-body pre {
 	box-sizing: border-box;
 	width: 100%;
 	max-width: 100%;
@@ -123,14 +141,16 @@
 }
 .message.assistant pre code,
 .user-message-body pre code,
-.thinking-body pre code {
+.thinking-body pre code,
+.compaction-body pre code {
 	padding: 0;
 	white-space: pre;
 	background: transparent;
 }
 .message.assistant hr,
 .user-message-body hr,
-.thinking-body hr {
+.thinking-body hr,
+.compaction-body hr {
 	height: 0;
 	margin: 1em 0;
 	border: 0;
@@ -143,7 +163,8 @@
 }
 .message.assistant table,
 .user-message-body table,
-.thinking-body table {
+.thinking-body table,
+.compaction-body table {
 	width: max-content;
 	min-width: 100%;
 	border-collapse: collapse;
@@ -153,14 +174,17 @@
 .user-message-body th,
 .user-message-body td,
 .thinking-body th,
-.thinking-body td {
+.thinking-body td,
+.compaction-body th,
+.compaction-body td {
 	padding: 6px 8px;
 	border: 1px solid var(--vscode-sideBar-border);
 	vertical-align: top;
 }
 .message.assistant th,
 .user-message-body th,
-.thinking-body th {
+.thinking-body th,
+.compaction-body th {
 	font-weight: 600;
 	background: var(--vscode-editor-inactiveSelectionBackground);
 }
