@@ -4,11 +4,11 @@ window.addEventListener("error", (event) => {
 		filename: event.filename,
 		lineno: event.lineno,
 		colno: event.colno,
-	});
+	}, "error");
 });
 
 window.addEventListener("unhandledrejection", (event) => {
-	postWebviewLog("Webview unhandled rejection", { reason: String(event.reason) });
+	postWebviewLog("Webview unhandled rejection", { reason: String(event.reason) }, "error");
 });
 
 logWebview("Chat webview loaded");

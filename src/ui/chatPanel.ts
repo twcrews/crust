@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
 import type { Model, RpcEvent, SlashCommand } from '../pi/rpcTypes';
+import { getCrustOutputChannel, logCrust, type CrustLogLevel } from '../utils/crustLogger';
 import type { SessionInfo, WebviewMessage } from './chatTypes';
 import { getChatWebviewHtml } from './chatWebview';
 import { buildPromptWithIdeContext, extractRestoredPrompt, getIdeContext } from './ideContext';
@@ -19,7 +20,7 @@ const execFileAsync = promisify(execFile);
 
 export class CrustChatPanel implements vscode.Disposable {
 	private static readonly viewType = 'crustChat';
-	private readonly output = vscode.window.createOutputChannel('Crust');
+	private readonly output = getCrustOutputChannel();
 	private readonly disposables: vscode.Disposable[] = [];
 	private readonly cwd: string | undefined;
 	private readonly client: PiRpcClient;
@@ -86,7 +87,6 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview);
 
 		this.disposables.push(
-			this.output,
 			this.panel.onDidDispose(() => this.dispose()),
 			this.panel.webview.onDidReceiveMessage((message: WebviewMessage) => this.handleWebviewMessage(message)),
 			vscode.window.onDidChangeActiveTextEditor((editor) => {
@@ -157,7 +157,7 @@ export class CrustChatPanel implements vscode.Disposable {
 						state = await this.client.getState();
 					}
 				} catch (error) {
-					this.log('Failed to switch to restored webview session', { error: error instanceof Error ? error.message : String(error), path: this.restoredSessionPath });
+					this.log('Failed to switch to restored webview session', { error: error instanceof Error ? error.message : String(error), path: this.restoredSessionPath }, 'warn');
 				}
 			}
 			const messages = await this.client.getMessages();
@@ -181,8 +181,8 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.log('Initialized chat panel', { modelCount: models.length, messageCount: messages.length, commandCount: commands.length, contextWindow: this.contextWindow });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.log('Failed to initialize chat panel', { error: message });
-			this.post({ type: 'error', message: `Unable to start Pi RPC: ${message}` });
+			this.log('Failed to initialize chat panel', { error: message }, 'error');
+			this.postError(`Unable to start Pi RPC: ${message}`);
 			if (this.isPiNotInstalledError(message)) {
 				this.showPiNotInstalledToast(message);
 			}
@@ -220,13 +220,13 @@ export class CrustChatPanel implements vscode.Disposable {
 				await this.refreshSlashCommands();
 				break;
 			case 'webviewLog':
-				this.log(`Webview: ${message.message ?? ''}`, message.details);
+				this.log(`Webview: ${message.message ?? ''}`, message.details, message.level ?? 'info');
 				break;
 		}
 	}
 
 	private handleClientError(message: string): void {
-		this.post({ type: 'error', message });
+		this.postError(message);
 		if (this.isPiNotInstalledError(message)) {
 			this.showPiNotInstalledToast(message);
 			return;
@@ -310,7 +310,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.postIdeContext();
 			void this.refreshSlashCommands();
 		} catch (error) {
-			this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+			this.postError(error instanceof Error ? error.message : String(error), { operation: 'newChat' });
 		}
 	}
 
@@ -339,7 +339,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.log('Selected session from history', { path: selected.session.path });
 			await this.restoreSession(selected.session);
 		} catch (error) {
-			this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+			this.postError(error instanceof Error ? error.message : String(error), { operation: 'showHistory' });
 		}
 	}
 
@@ -538,7 +538,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.piSlashCommands = await this.client.getCommands();
 			this.postSlashCommands();
 		} catch (error) {
-			this.log('Failed to refresh slash commands', { error: error instanceof Error ? error.message : String(error) });
+			this.log('Failed to refresh slash commands', { error: error instanceof Error ? error.message : String(error) }, 'warn');
 		}
 	}
 
@@ -578,7 +578,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			}
 			return commands.length ? commands : [{ name: 'new', description: 'Start a new session', source: 'builtin' }];
 		} catch (error) {
-			this.log('Failed to load Pi builtin slash commands', { error: error instanceof Error ? error.message : String(error) });
+			this.log('Failed to load Pi builtin slash commands', { error: error instanceof Error ? error.message : String(error) }, 'warn');
 			return [{ name: 'new', description: 'Start a new session', source: 'builtin' }];
 		}
 	}
@@ -637,7 +637,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				this.post({ type: 'focusModel' });
 				return;
 			default:
-				this.post({ type: 'error', message: `/${commandName} is a Pi TUI command and is not available in Crust yet.` });
+				this.postError(`/${commandName} is a Pi TUI command and is not available in Crust yet.`);
 		}
 	}
 
@@ -679,7 +679,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.post({ type: 'sessionPath', sessionPath });
 			this.watchSessionFile(sessionPath);
 		} catch (error) {
-			this.log('Failed to post current session path', { error: error instanceof Error ? error.message : String(error) });
+			this.log('Failed to post current session path', { error: error instanceof Error ? error.message : String(error) }, 'warn');
 		}
 	}
 
@@ -716,7 +716,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				this.setCurrentModel(model);
 			}
 		} catch (error) {
-			this.log('Failed to refresh current model from Pi state', { error: error instanceof Error ? error.message : String(error) });
+			this.log('Failed to refresh current model from Pi state', { error: error instanceof Error ? error.message : String(error) }, 'warn');
 		}
 	}
 
@@ -733,7 +733,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.setCurrentModel(model);
 			return true;
 		} catch (error) {
-			this.log('Failed to refresh current model from session file', { error: error instanceof Error ? error.message : String(error), path: this.activeSessionPath });
+			this.log('Failed to refresh current model from session file', { error: error instanceof Error ? error.message : String(error), path: this.activeSessionPath }, 'warn');
 			return false;
 		}
 	}
@@ -783,7 +783,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				}, 100);
 			});
 		} catch (error) {
-			this.log('Failed to watch session file for model changes', { error: error instanceof Error ? error.message : String(error), path: sessionPath });
+			this.log('Failed to watch session file for model changes', { error: error instanceof Error ? error.message : String(error), path: sessionPath }, 'warn');
 		}
 	}
 
@@ -828,7 +828,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			await this.client.prompt(promptText, this.isStreaming ? 'followUp' : undefined);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.log('Prompt failed', { error: message });
+			this.log('Prompt failed', { error: message }, 'error');
 			const assistantMessageId = this.getStreamingTextMessageId(0);
 			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\nError: ${message}` });
 			this.maybeShowModelConnectionToast(message);
@@ -852,7 +852,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.post({ type: 'addMessage', id: this.createId('user'), role: 'user', text: trimmed });
 			await this.client.steer(trimmed);
 		} catch (error) {
-			this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+			this.postError(error instanceof Error ? error.message : String(error), { operation: 'steerPrompt' });
 		}
 	}
 
@@ -868,7 +868,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.showAbortIndicator(lastAssistant);
 			this.post({ type: 'status', message: 'Stopped.' });
 		} catch (error) {
-			this.post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+			this.postError(error instanceof Error ? error.message : String(error), { operation: 'cancelPrompt' });
 		} finally {
 			this.setProcessing(false);
 			this.isStreaming = false;
@@ -892,7 +892,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			await this.postSessionStatus(await this.client.getMessages());
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.post({ type: 'error', message });
+			this.postError(message, { operation: 'selectModel' });
 			this.maybeShowModelConnectionToast(message);
 		}
 	}
@@ -1271,18 +1271,13 @@ export class CrustChatPanel implements vscode.Disposable {
 		};
 	}
 
-	private log(message: string, details?: unknown): void {
-		const timestamp = new Date().toISOString();
-		const suffix = details === undefined ? '' : ` ${this.stringifyLogDetails(details)}`;
-		this.output.appendLine(`[${timestamp}] ${message}${suffix}`);
+	private postError(message: string, details?: unknown): void {
+		this.log(message, details, 'error');
+		this.post({ type: 'error', message });
 	}
 
-	private stringifyLogDetails(details: unknown): string {
-		try {
-			return JSON.stringify(details);
-		} catch {
-			return String(details);
-		}
+	private log(message: string, details?: unknown, level: CrustLogLevel = 'info'): void {
+		logCrust(message, details, level);
 	}
 
 	private setSessionTitleFromPrompt(prompt: string): void {

@@ -10,6 +10,7 @@ export type WebviewMessage = {
 	query?: string;
 	message?: string;
 	details?: unknown;
+	level?: 'info' | 'warn' | 'error';
 	includeIdeContext?: boolean;
 };
 

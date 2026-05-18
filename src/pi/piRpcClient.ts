@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import * as vscode from 'vscode';
+import { logCrust, type CrustLogLevel } from '../utils/crustLogger';
 import { isRpcEvent, isRpcResponse, normalizeSlashCommand, type Model, type RpcEvent, type RpcResponse, type SlashCommand } from './rpcTypes';
 
 type PendingRequest = {
@@ -37,15 +38,15 @@ export class PiRpcClient implements vscode.Disposable {
 
 		this.process.stdout.on('data', (chunk: string) => this.handleStdout(chunk));
 		this.process.stderr.on('data', (chunk: string) => {
-			this.log('Pi RPC stderr', { message: chunk.trim() });
+			this.log('Pi RPC stderr', { message: chunk.trim() }, 'warn');
 			this.errorEmitter.fire(chunk.trim());
 		});
 		this.process.on('error', (error) => {
-			this.log('Pi RPC process error', { error: error.message });
+			this.log('Pi RPC process error', { error: error.message }, 'error');
 			this.failAll(error);
 		});
 		this.process.on('exit', (code, signal) => {
-			this.log('Pi RPC process exited', { code, signal });
+			this.log('Pi RPC process exited', { code, signal }, code === 0 ? 'info' : 'error');
 			this.errorEmitter.fire(`Pi exited${code === null ? '' : ` with code ${code}`}${signal ? ` (${signal})` : ''}.`);
 			this.process = undefined;
 			this.failAll(new Error('Pi RPC process exited.'));
@@ -141,6 +142,7 @@ export class PiRpcClient implements vscode.Disposable {
 
 		this.log('Received Pi RPC response', { id, command: response.command, success: response.success });
 		if (!response.success) {
+			this.log('Pi RPC command failed', { id, command: response.command, error: response.error }, 'error');
 			throw new Error(response.error ?? `${response.command} failed`);
 		}
 		return response;
@@ -175,7 +177,7 @@ export class PiRpcClient implements vscode.Disposable {
 				this.eventEmitter.fire(message);
 			}
 		} catch (error) {
-			this.log('Failed to parse Pi RPC output', { error: error instanceof Error ? error.message : String(error), line });
+			this.log('Failed to parse Pi RPC output', { error: error instanceof Error ? error.message : String(error), line }, 'error');
 			this.errorEmitter.fire(`Failed to parse Pi RPC output: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
@@ -194,10 +196,14 @@ export class PiRpcClient implements vscode.Disposable {
 		pending.resolve(response);
 	}
 
-	private log(message: string, details?: unknown): void {
+	private log(message: string, details?: unknown, level: CrustLogLevel = 'info'): void {
 		const timestamp = new Date().toISOString();
 		const suffix = details === undefined ? '' : ` ${JSON.stringify(details)}`;
-		PiRpcClient.output.appendLine(`[${timestamp}] ${message}${suffix}`);
+		const prefix = level === 'info' ? '' : `${level.toUpperCase()} `;
+		PiRpcClient.output.appendLine(`[${timestamp}] ${prefix}${message}${suffix}`);
+		if (level !== 'info') {
+			logCrust(message, details, level);
+		}
 	}
 
 	private failAll(error: Error): void {
