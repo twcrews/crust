@@ -4,6 +4,13 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.7.0] - 2026-05-18
+
+- Added manual `/compact` chat flow with optional custom instructions and session status refreshes.
+- Rendered compaction results and restored compaction summaries as expandable shaded chat bubbles.
+- Expanded built-in slash command fallbacks and test coverage for compaction behavior.
+- Updated release staging instructions and agent guidance.
+
 ## [0.6.2] - 2026-05-18
 
 - Improved provider error rendering in chat, including errors reported on `message_end` events.
@@ -77,6 +84,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.7.0]: https://github.com/twcrews/crust/compare/0.6.2...0.7.0
 [0.6.2]: https://github.com/twcrews/crust/compare/0.6.1...0.6.2
 [0.6.1]: https://github.com/twcrews/crust/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/twcrews/crust/compare/0.5.0...0.6.0
