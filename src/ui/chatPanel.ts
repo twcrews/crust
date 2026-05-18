@@ -1,55 +1,22 @@
-import { execFile } from 'node:child_process';
 import { watch, type FSWatcher } from 'node:fs';
-import { readFile, realpath } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
-import { promisify } from 'node:util';
+import { readFile } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
-import { isToolResult, type MessageUpdateEvent, type Model, type RpcEvent, type SlashCommand, type ToolExecutionEndEvent, type ToolExecutionStartEvent, type ToolExecutionUpdateEvent } from '../pi/rpcTypes';
+import { type Model, type RpcEvent, type SlashCommand } from '../pi/rpcTypes';
 import { getCrustOutputChannel, logCrust, type CrustLogLevel } from '../utils/crustLogger';
 import { errorMessage } from '../utils/errorMessage';
 import { parseWebviewMessage, type SessionInfo } from './chatTypes';
 import { getChatWebviewHtml } from './chatWebview';
-import { buildPromptWithIdeContext, extractRestoredPrompt, getIdeContext } from './ideContext';
-import { getBlockText, getBlockType, getEntryTimestamp, getMessageContent, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from './messageUtils';
+import { buildPromptWithIdeContext, getIdeContext } from './ideContext';
+import { getMessageRole } from './messageUtils';
+import { createId, formatErrorForChat, formatSessionDate, getAbortMessage, getInitialCwd, getLastModelFromSessionText, getModelContextWindow, getPostLogDetails, getSessionPath, getWorkspaceStatus, hasMessageUsage, isAbortedAssistantMessage, modelKey, truncate } from './chatPanelUtils';
+import { createConversationState, resetStreamingState, type ConversationState } from './conversationState';
 import { getPathSuggestions } from './pathAutocomplete';
 import { listSessions } from './sessionHistory';
-import { getToolBody, getToolHeaderDetail, getToolResultText, isRenderableTool } from './toolUtils';
+import { restoreSessionMessages } from './sessionRestoreRenderer';
+import { dedupeSlashCommands, getBuiltinSlashCommands } from './slashCommands';
+import { StreamingEventRenderer } from './streamingEventRenderer';
 import { formatUsageStatus } from './usageStatus';
-
-const execFileAsync = promisify(execFile);
-
-type ConversationState = {
-	isProcessing: boolean;
-	isStreaming: boolean;
-	activeThinkingMessageId: string | undefined;
-	activeLoadingMessageId: string | undefined;
-	hasSessionTitle: boolean;
-	activeToolCallIds: Map<string, string>;
-	activeToolCallArgs: Map<string, unknown>;
-	activeTextMessageIds: Map<number, string>;
-	activeAbortIndicatorShown: boolean;
-	activeErrorMessageShown: boolean;
-	usageMessages: unknown[];
-	activeUsageMessage: unknown;
-};
-
-function createConversationState(): ConversationState {
-	return {
-		isProcessing: false,
-		isStreaming: false,
-		activeThinkingMessageId: undefined,
-		activeLoadingMessageId: undefined,
-		hasSessionTitle: false,
-		activeToolCallIds: new Map<string, string>(),
-		activeToolCallArgs: new Map<string, unknown>(),
-		activeTextMessageIds: new Map<number, string>(),
-		activeAbortIndicatorShown: false,
-		activeErrorMessageShown: false,
-		usageMessages: [],
-		activeUsageMessage: undefined,
-	};
-}
 
 export class CrustChatPanel implements vscode.Disposable {
 	private static readonly viewType = 'crustChat';
@@ -103,7 +70,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		private readonly panel: vscode.WebviewPanel,
 		private readonly restoredSessionPath?: string,
 	) {
-		this.cwd = this.getInitialCwd();
+		this.cwd = getInitialCwd();
 		this.client = new PiRpcClient(this.cwd);
 		this.log('Creating chat panel', { cwd: this.cwd });
 		this.panel.iconPath = this.getIconPath();
@@ -139,28 +106,6 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 
-	private getInitialCwd(): string | undefined {
-		const activeDocumentUri = vscode.window.activeTextEditor?.document.uri;
-		if (activeDocumentUri?.scheme === 'file') {
-			const workspaceFolder = vscode.workspace.getWorkspaceFolder(activeDocumentUri)?.uri.fsPath;
-			if (workspaceFolder) {
-				return workspaceFolder;
-			}
-
-			return this.getFileBackedCwd(activeDocumentUri.fsPath) ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-		}
-		return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-	}
-
-	private getFileBackedCwd(filePath: string): string | undefined {
-		const parts = filePath.split(/[\\/]+/);
-		const piIndex = parts.lastIndexOf('.pi');
-		if (piIndex > 0) {
-			return parts.slice(0, piIndex).join('/') || (filePath.startsWith('/') ? '/' : undefined);
-		}
-		return dirname(filePath);
-	}
-
 	private async initialize(): Promise<void> {
 		this.postIdeContext();
 		try {
@@ -170,10 +115,10 @@ export class CrustChatPanel implements vscode.Disposable {
 				this.client.getAvailableModels(),
 				this.client.getState(),
 				this.client.getCommands(),
-				this.getBuiltinSlashCommands(),
+				getBuiltinSlashCommands((message, details, level) => this.log(message, details, level)),
 			]);
 			let state = initialState;
-			if (this.restoredSessionPath && this.getSessionPath(state) !== this.restoredSessionPath) {
+			if (this.restoredSessionPath && getSessionPath(state) !== this.restoredSessionPath) {
 				try {
 					this.log('Switching to restored webview session', { path: this.restoredSessionPath });
 					if (await this.client.switchSession(this.restoredSessionPath)) {
@@ -189,8 +134,8 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.builtinSlashCommands = builtinCommands;
 			const currentModel = (state as { model?: Model | null } | undefined)?.model;
 			this.currentModel = currentModel ?? undefined;
-			this.contextWindow = this.getModelContextWindow(currentModel);
-			const sessionPath = this.getSessionPath(state);
+			this.contextWindow = getModelContextWindow(currentModel);
+			const sessionPath = getSessionPath(state);
 			this.post({ type: 'sessionPath', sessionPath });
 			this.watchSessionFile(sessionPath);
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
@@ -323,8 +268,8 @@ export class CrustChatPanel implements vscode.Disposable {
 
 			const selected = await vscode.window.showQuickPick(
 				sessions.map((session) => ({
-					label: session.name || this.truncate(session.firstMessage, 80),
-					description: this.formatSessionDate(session.modified),
+					label: session.name || truncate(session.firstMessage, 80),
+					description: formatSessionDate(session.modified),
 					detail: `${session.messageCount} messages · ${session.path}`,
 					session,
 				})),
@@ -357,18 +302,10 @@ export class CrustChatPanel implements vscode.Disposable {
 		await this.postCurrentSessionPath();
 		void this.refreshSlashCommands();
 	}
-
 	private async restoreMessages(messages: unknown[], sessionName?: string): Promise<void> {
-		const restoredToolCalls = new Map<string, { elementId: string; name?: string; args?: unknown }>();
-		let firstUserMessage: string | undefined;
-		for (const message of messages) {
-			const restoredFirstUserMessage = this.restoreMessage(message, restoredToolCalls);
-			firstUserMessage ??= restoredFirstUserMessage;
-		}
-
-		const title = sessionName ? extractRestoredPrompt(sessionName).text : firstUserMessage || 'New Chat';
-		this.conversationState.hasSessionTitle = Boolean(firstUserMessage || sessionName);
-		this.post({ type: 'sessionTitle', title: this.truncate(title, 50) });
+		const restored = restoreSessionMessages(messages, sessionName, (message) => this.post(message), (text) => this.getSlashCommandLabel(text));
+		this.conversationState.hasSessionTitle = restored.hasSessionTitle;
+		this.post({ type: 'sessionTitle', title: restored.title });
 		await this.postSessionStatus(messages);
 	}
 
@@ -380,135 +317,6 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 
-	private restoreMessage(
-		message: unknown,
-		toolCalls: Map<string, { elementId: string; name?: string; args?: unknown }>,
-	): string | undefined {
-		const role = getMessageRole(message);
-		if (role === 'user') {
-			const restoredPrompt = extractRestoredPrompt(getMessageText(message).trim());
-			const slashCommandLabel = restoredPrompt.skillLabel ?? this.getSlashCommandLabel(restoredPrompt.text);
-			if (restoredPrompt.text || slashCommandLabel) {
-				this.post({
-					type: 'addMessage',
-					id: this.createId('user'),
-					role: 'user',
-					text: slashCommandLabel && !restoredPrompt.skillLabel ? '' : restoredPrompt.text,
-					ideContextLabel: restoredPrompt.ideContextLabel,
-					slashCommandLabel,
-				});
-				return slashCommandLabel ?? restoredPrompt.text;
-			}
-			return undefined;
-		}
-
-		if (role === 'assistant') {
-			this.restoreAssistantMessage(message, toolCalls);
-			return undefined;
-		}
-
-		if (role === 'toolResult') {
-			this.restoreToolResult(message, toolCalls);
-			return undefined;
-		}
-
-		const text = getMessageText(message).trim();
-		if (text) {
-			this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text });
-		}
-		return undefined;
-	}
-
-	private restoreAssistantMessage(
-		message: unknown,
-		toolCalls: Map<string, { elementId: string; name?: string; args?: unknown }>,
-	): void {
-		const content = getMessageContent(message);
-		if (typeof content === 'string') {
-			this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text: content });
-			this.restoreAbortIndicator(message);
-			return;
-		}
-
-		if (!Array.isArray(content)) {
-			this.restoreAbortIndicator(message);
-			return;
-		}
-
-		for (const block of content) {
-			const type = getBlockType(block);
-			if (type === 'text') {
-				const text = getBlockText(block, 'text').trim();
-				if (text) {
-					this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text });
-				}
-			}
-			if (type === 'thinking') {
-				const thinking = getBlockText(block, 'thinking');
-				if (thinking.trim()) {
-					const id = this.createId('thinking');
-					this.post({ type: 'addThinking', id });
-					this.post({ type: 'appendThinking', id, text: thinking });
-				}
-			}
-			if (type === 'toolCall') {
-				this.restoreToolCall(block, toolCalls);
-			}
-		}
-		this.restoreAbortIndicator(message);
-	}
-
-	private restoreAbortIndicator(message: unknown): void {
-		if (!this.isAbortedAssistantMessage(message)) {
-			return;
-		}
-		this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text: `_${this.getAbortMessage(message)}_`, secondary: true });
-	}
-
-	private restoreToolCall(block: unknown, toolCalls: Map<string, { elementId: string; name?: string; args?: unknown }>): void {
-		const record = block as { id?: unknown; name?: unknown; toolName?: unknown; arguments?: unknown; args?: unknown };
-		const toolCallId = typeof record.id === 'string' ? record.id : this.createId('restored-toolcall-id');
-		const name = typeof record.name === 'string' ? record.name : typeof record.toolName === 'string' ? record.toolName : undefined;
-		const args = record.arguments ?? record.args;
-		if (!isRenderableTool(name)) {
-			return;
-		}
-
-		const elementId = this.createId('restored-tool');
-		toolCalls.set(toolCallId, { elementId, name, args });
-		this.post({
-			type: 'upsertTool',
-			id: elementId,
-			toolName: name,
-			path: getToolHeaderDetail(name, args),
-			status: 'pending',
-			body: getToolBody(name, args),
-			isDiff: name === 'edit',
-		});
-	}
-
-	private restoreToolResult(message: unknown, toolCalls: Map<string, { elementId: string; name?: string; args?: unknown }>): void {
-		const record = message as { toolCallId?: unknown; toolName?: unknown; isError?: unknown; details?: unknown };
-		const toolCall = typeof record.toolCallId === 'string' ? toolCalls.get(record.toolCallId) : undefined;
-		const name = typeof record.toolName === 'string' ? record.toolName : toolCall?.name;
-		if (!isRenderableTool(name)) {
-			return;
-		}
-
-		const result = isToolResult(message) ? message : undefined;
-		const diff = typeof result?.details?.diff === 'string' ? result.details.diff : undefined;
-		const isError = record.isError === true;
-		this.post({
-			type: 'upsertTool',
-			id: toolCall?.elementId ?? this.createId('restored-tool'),
-			toolName: name,
-			path: getToolHeaderDetail(name, toolCall?.args, isError ? undefined : result),
-			status: isError ? 'error' : 'done',
-			body: name === 'read' && !isError ? undefined : diff ?? getToolResultText(result) ?? getToolBody(name, toolCall?.args),
-			isDiff: Boolean(diff),
-		});
-	}
-
 	private async refreshUsageStatus(): Promise<void> {
 		try {
 			await this.postSessionStatus(await this.client.getMessages());
@@ -518,7 +326,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private finalizeUsageStatus(message: unknown): void {
-		if (!this.hasMessageUsage(message)) {
+		if (!hasMessageUsage(message)) {
 			void this.refreshUsageStatus();
 			return;
 		}
@@ -531,7 +339,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.conversationState.usageMessages = messages;
 		this.conversationState.activeUsageMessage = undefined;
 		if (!messages.length) {
-			this.post({ type: 'status', message: await this.getWorkspaceStatus() });
+			this.post({ type: 'status', message: await getWorkspaceStatus(this.cwd) });
 			return;
 		}
 		this.postCurrentUsageStatus();
@@ -547,7 +355,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private postSlashCommands(): void {
-		const commands = this.dedupeSlashCommands([
+		const commands = dedupeSlashCommands([
 			...this.builtinSlashCommands,
 			...this.piSlashCommands,
 		]);
@@ -559,32 +367,6 @@ export class CrustChatPanel implements vscode.Disposable {
 			commandNames: commands.slice(0, 50).map((command) => command.name),
 		});
 		this.post({ type: 'slashCommands', commands });
-	}
-
-	private dedupeSlashCommands(commands: SlashCommand[]): SlashCommand[] {
-		const byName = new Map<string, SlashCommand>();
-		for (const command of commands) {
-			if (!byName.has(command.name)) {
-				byName.set(command.name, command);
-			}
-		}
-		return [...byName.values()];
-	}
-
-	private async getBuiltinSlashCommands(): Promise<SlashCommand[]> {
-		try {
-			const { stdout } = await execFileAsync('which', ['pi']);
-			const piCliPath = await realpath(stdout.trim());
-			const source = await readFile(join(dirname(piCliPath), 'core', 'slash-commands.js'), 'utf8');
-			const commands: SlashCommand[] = [];
-			for (const match of source.matchAll(/\{\s*name:\s*"([^"]+)",\s*description:\s*(?:"([^"]*)"|`([^`]*)`)\s*\}/g)) {
-				commands.push({ name: match[1], description: (match[2] ?? match[3]).replace(/\$\{APP_NAME\}/g, 'Pi'), source: 'builtin' });
-			}
-			return commands.length ? commands : [{ name: 'new', description: 'Start a new session', source: 'builtin' }];
-		} catch (error) {
-			this.log('Failed to load Pi builtin slash commands', { error: errorMessage(error) }, 'warn');
-			return [{ name: 'new', description: 'Start a new session', source: 'builtin' }];
-		}
 	}
 
 	private async runSlashCommand(commandName: string, commandText: string): Promise<void> {
@@ -645,28 +427,6 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 
-	private async getWorkspaceStatus(): Promise<string> {
-		if (!this.cwd) {
-			return 'No workspace folder';
-		}
-
-		const workspaceName = basename(this.cwd) || this.cwd;
-		const branch = await this.getGitBranch();
-		return branch ? `${workspaceName} - ${branch}` : `${workspaceName} - no branch`;
-	}
-
-	private async getGitBranch(): Promise<string | undefined> {
-		if (!this.cwd) {
-			return undefined;
-		}
-		try {
-			const { stdout } = await execFileAsync('git', ['-C', this.cwd, 'branch', '--show-current']);
-			return stdout.trim() || undefined;
-		} catch {
-			return undefined;
-		}
-	}
-
 	private postCurrentUsageStatus(): void {
 		const messages = this.conversationState.activeUsageMessage === undefined ? this.conversationState.usageMessages : [...this.conversationState.usageMessages, this.conversationState.activeUsageMessage];
 		this.post({ type: 'status', message: formatUsageStatus(messages, this.contextWindow) });
@@ -679,7 +439,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private async postCurrentSessionPath(): Promise<void> {
 		try {
-			const sessionPath = this.getSessionPath(await this.client.getState());
+			const sessionPath = getSessionPath(await this.client.getState());
 			this.post({ type: 'sessionPath', sessionPath });
 			this.watchSessionFile(sessionPath);
 		} catch (error) {
@@ -688,10 +448,10 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private setCurrentModel(model: Model | undefined): void {
-		const previousKey = this.currentModel ? this.modelKey(this.currentModel) : undefined;
-		const nextKey = model ? this.modelKey(model) : undefined;
+		const previousKey = this.currentModel ? modelKey(this.currentModel) : undefined;
+		const nextKey = model ? modelKey(model) : undefined;
 		this.currentModel = model;
-		this.contextWindow = this.getModelContextWindow(model);
+		this.contextWindow = getModelContextWindow(model);
 		if (previousKey !== nextKey) {
 			this.log('Current model changed', { previous: previousKey, current: nextKey });
 		}
@@ -703,10 +463,10 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private postModels(): void {
 		const models = [...this.models];
-		if (this.currentModel && !models.some((model) => this.modelKey(model) === this.modelKey(this.currentModel!))) {
+		if (this.currentModel && !models.some((model) => modelKey(model) === modelKey(this.currentModel!))) {
 			models.push(this.currentModel);
 		}
-		this.post({ type: 'models', models, selected: this.currentModel ? this.modelKey(this.currentModel) : undefined });
+		this.post({ type: 'models', models, selected: this.currentModel ? modelKey(this.currentModel) : undefined });
 	}
 
 	private async refreshCurrentModel(): Promise<void> {
@@ -730,7 +490,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 		try {
 			const text = await readFile(this.activeSessionPath, 'utf8');
-			const model = this.getLastModelFromSessionText(text);
+			const model = getLastModelFromSessionText(text, this.models);
 			if (!model) {
 				return false;
 			}
@@ -740,31 +500,6 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.log('Failed to refresh current model from session file', { error: errorMessage(error), path: this.activeSessionPath }, 'warn');
 			return false;
 		}
-	}
-
-	private getLastModelFromSessionText(text: string): Model | undefined {
-		let latest: Model | undefined;
-		for (const line of text.split(/\r?\n/)) {
-			const entry = parseJsonObject(line);
-			if (!entry) {
-				continue;
-			}
-			if (entry.type === 'model_change' && typeof entry.provider === 'string' && typeof entry.modelId === 'string') {
-				latest = this.findKnownModel(entry.provider, entry.modelId) ?? { provider: entry.provider, id: entry.modelId };
-				continue;
-			}
-			const message = entry.message;
-			if (entry.type === 'message' && getMessageRole(message) === 'assistant' && typeof (message as { provider?: unknown }).provider === 'string' && typeof (message as { model?: unknown }).model === 'string') {
-				const provider = (message as { provider: string }).provider;
-				const modelId = (message as { model: string }).model;
-				latest = this.findKnownModel(provider, modelId) ?? { provider, id: modelId };
-			}
-		}
-		return latest;
-	}
-
-	private findKnownModel(provider: string, modelId: string): Model | undefined {
-		return this.models.find((model) => model.provider === provider && model.id === modelId);
 	}
 
 	private watchSessionFile(sessionPath: string | undefined): void {
@@ -816,8 +551,8 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.setSessionTitleFromPrompt(display?.slashCommandLabel ?? displayText);
 		}
 
-		const userMessageId = this.createId('user');
-		this.conversationState.activeLoadingMessageId = this.createId('loading');
+		const userMessageId = createId('user');
+		this.conversationState.activeLoadingMessageId = createId('loading');
 		this.conversationState.activeTextMessageIds.clear();
 		this.conversationState.activeAbortIndicatorShown = false;
 		this.conversationState.activeErrorMessageShown = false;
@@ -835,7 +570,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			const message = errorMessage(error);
 			this.log('Prompt failed', { error: message }, 'error');
 			const assistantMessageId = this.getStreamingTextMessageId(0);
-			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\n${this.formatErrorForChat(message)}`, error: true });
+			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\n${formatErrorForChat(message)}`, error: true });
 			this.removeActiveLoadingMessage();
 			this.setProcessing(false);
 		}
@@ -853,7 +588,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 		try {
 			this.log('Steering prompt', { length: trimmed.length });
-			this.post({ type: 'addMessage', id: this.createId('user'), role: 'user', text: trimmed });
+			this.post({ type: 'addMessage', id: createId('user'), role: 'user', text: trimmed });
 			await this.client.steer(trimmed);
 		} catch (error) {
 			this.postError(errorMessage(error), { operation: 'steerPrompt' });
@@ -875,17 +610,13 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.postError(errorMessage(error), { operation: 'cancelPrompt' });
 		} finally {
 			this.setProcessing(false);
-			this.conversationState.isStreaming = false;
-			this.conversationState.activeThinkingMessageId = undefined;
-			this.conversationState.activeToolCallIds.clear();
-			this.conversationState.activeToolCallArgs.clear();
-			this.conversationState.activeTextMessageIds.clear();
+			resetStreamingState(this.conversationState);
 			this.removeActiveLoadingMessage();
 		}
 	}
 
-	private async selectModel(modelKey: string | undefined): Promise<void> {
-		const model = this.models.find((candidate) => this.modelKey(candidate) === modelKey);
+	private async selectModel(selectedModelKey: string | undefined): Promise<void> {
+		const model = this.models.find((candidate) => modelKey(candidate) === selectedModelKey);
 		if (!model) {
 			return;
 		}
@@ -898,175 +629,29 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.postError(errorMessage(error), { operation: 'selectModel' });
 		}
 	}
-
 	private handlePiEvent(event: RpcEvent): void {
-		if (event.type === 'model_select' && event.model) {
-			this.setCurrentModel(event.model);
-			return;
-		}
-		if (event.type === 'agent_start') {
-			this.setProcessing(true);
-			this.conversationState.isStreaming = true;
-			this.conversationState.activeThinkingMessageId = undefined;
-			this.conversationState.activeToolCallIds.clear();
-			this.conversationState.activeToolCallArgs.clear();
-			this.conversationState.activeTextMessageIds.clear();
-			this.conversationState.activeAbortIndicatorShown = false;
-			this.conversationState.activeErrorMessageShown = false;
-			return;
-		}
-
-		if (event.type === 'agent_end') {
-			const assistantMessage = event.message ?? this.getLastAssistantMessage(event.messages);
-			this.handleTerminalAssistantMessage(assistantMessage);
-			this.setProcessing(false);
-			this.conversationState.isStreaming = false;
-			this.conversationState.activeThinkingMessageId = undefined;
-			this.conversationState.activeToolCallIds.clear();
-			this.conversationState.activeToolCallArgs.clear();
-			this.conversationState.activeTextMessageIds.clear();
-			this.removeActiveLoadingMessage();
-			this.finalizeUsageStatus(assistantMessage);
-			void this.postCurrentSessionPath();
-			void this.refreshCurrentModel();
-			return;
-		}
-
-		if (event.type === 'tool_execution_start') {
-			this.showToolExecutionStart(event);
-			return;
-		}
-
-		if (event.type === 'tool_execution_update') {
-			this.showToolExecutionUpdate(event);
-			return;
-		}
-
-		if (event.type === 'tool_execution_end') {
-			this.showToolExecutionEnd(event);
-			return;
-		}
-
-		if (event.type === 'message_end') {
-			this.handleTerminalAssistantMessage(event.message);
-			this.finalizeUsageStatus(event.message);
-			return;
-		}
-
-		if (event.type !== 'message_update') {
-			return;
-		}
-
-		this.showStreamingUsage(event);
-		this.showStreamingThinking(event);
-		this.showStreamingToolCall(event);
-		this.showAbortIndicator(event.message);
-
-		const assistantEvent = event.assistantMessageEvent;
-		if (assistantEvent?.type === 'text_delta' && assistantEvent.delta) {
-			this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(assistantEvent.contentIndex ?? 0), text: assistantEvent.delta });
-		}
-
-		if (assistantEvent?.type === 'error') {
-			const assistantErrorMessage = this.getAssistantErrorMessage(event.message);
-			const message = assistantErrorMessage ?? assistantEvent.reason ?? 'unknown error';
-			this.showAssistantErrorInChat(message, assistantEvent.contentIndex ?? 0);
-		}
+		this.createStreamingEventRenderer().handlePiEvent(event);
 	}
 
-	private handleTerminalAssistantMessage(message: unknown): void {
-		this.showAbortIndicator(message);
-		const errorMessage = this.getAssistantErrorMessage(message);
-		if (!errorMessage) {
-			return;
-		}
-		this.showAssistantErrorInChat(errorMessage);
+	private createStreamingEventRenderer(): StreamingEventRenderer {
+		return new StreamingEventRenderer(this.conversationState, {
+			post: (message) => this.post(message),
+			setProcessing: (isProcessing) => this.setProcessing(isProcessing),
+			setCurrentModel: (model) => this.setCurrentModel(model),
+			finalizeUsageStatus: (message) => this.finalizeUsageStatus(message),
+			postCurrentUsageStatus: () => this.postCurrentUsageStatus(),
+			postCurrentSessionPath: () => { void this.postCurrentSessionPath(); },
+			refreshCurrentModel: () => { void this.refreshCurrentModel(); },
+		});
 	}
 
-	private showAssistantErrorInChat(message: string, contentIndex = 0): void {
-		if (this.conversationState.activeErrorMessageShown) {
-			return;
-		}
-		this.conversationState.activeErrorMessageShown = true;
-		this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(contentIndex), text: `\n${this.formatErrorForChat(message)}`, error: true });
-	}
-
-	private formatErrorForChat(message: string): string {
-		const pretty = this.tryPrettyPrintJsonError(message);
-		return `Error: ${pretty}`;
-	}
-
-	private tryPrettyPrintJsonError(message: string): string {
-		const jsonStart = [...message]
-			.map((char, index) => (char === '{' || char === '[' ? index : -1))
-			.find((index) => index >= 0);
-		if (jsonStart === undefined) {
-			return message;
-		}
-
-		const prefix = message.slice(0, jsonStart).trim();
-		const jsonText = message.slice(jsonStart).trim();
-		try {
-			const parsed = JSON.parse(jsonText) as unknown;
-			const formattedJson = JSON.stringify(parsed, null, 2);
-			return `${prefix ? `${prefix}\n` : ''}\n\`\`\`json\n${formattedJson}\n\`\`\``;
-		} catch {
-			return message;
-		}
-	}
-
-	private getLastAssistantMessage(messages: unknown): unknown {
-		if (!Array.isArray(messages)) {
-			return undefined;
-		}
-		return messages.slice().reverse().find((message) => getMessageRole(message) === 'assistant');
-	}
-
-	private showAbortIndicator(message: unknown): void {
-		if (this.conversationState.activeAbortIndicatorShown || !this.isAbortedAssistantMessage(message)) {
-			return;
-		}
-		this.conversationState.activeAbortIndicatorShown = true;
-		this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text: `_${this.getAbortMessage(message)}_`, secondary: true });
-	}
-
-	private getAssistantErrorMessage(message: unknown): string | undefined {
-		if (
-			getMessageRole(message) !== 'assistant'
-			|| typeof message !== 'object'
-			|| message === null
-			|| (message as { stopReason?: unknown }).stopReason !== 'error'
-		) {
-			return undefined;
-		}
-		const errorMessage = (message as { errorMessage?: unknown }).errorMessage;
-		return typeof errorMessage === 'string' && errorMessage ? errorMessage : 'Unknown error';
-	}
-
-	private isAbortedAssistantMessage(message: unknown): boolean {
-		return getMessageRole(message) === 'assistant'
-			&& typeof message === 'object'
-			&& message !== null
-			&& (message as { stopReason?: unknown }).stopReason === 'aborted';
-	}
-
-	private getAbortMessage(message: unknown): string {
-		if (typeof message !== 'object' || message === null) {
-			return 'Operation aborted';
-		}
-		const errorMessage = (message as { errorMessage?: unknown }).errorMessage;
-		return typeof errorMessage === 'string' && errorMessage && errorMessage !== 'Request was aborted'
-			? errorMessage
-			: 'Operation aborted';
-	}
 
 	private getStreamingTextMessageId(contentIndex: number): string {
 		const existing = this.conversationState.activeTextMessageIds.get(contentIndex);
 		if (existing) {
 			return existing;
 		}
-
-		const id = this.createId('assistant');
+		const id = createId('assistant');
 		this.conversationState.activeTextMessageIds.set(contentIndex, id);
 		this.post({ type: 'addMessage', id, role: 'assistant', text: '' });
 		return id;
@@ -1080,162 +665,12 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.conversationState.activeLoadingMessageId = undefined;
 	}
 
-	private showToolExecutionStart(event: ToolExecutionStartEvent): void {
-		if (!isRenderableTool(event.toolName)) {
+	private showAbortIndicator(message: unknown): void {
+		if (this.conversationState.activeAbortIndicatorShown || !isAbortedAssistantMessage(message)) {
 			return;
 		}
-
-		const args = event.args ?? (event.toolCallId ? this.conversationState.activeToolCallArgs.get(event.toolCallId) : undefined);
-		const id = this.toolElementId(event.toolCallId);
-		this.post({
-			type: 'upsertTool',
-			id,
-			toolName: event.toolName,
-			path: getToolHeaderDetail(event.toolName, args),
-			status: 'running',
-			body: getToolBody(event.toolName, args),
-		});
-	}
-
-	private showToolExecutionUpdate(event: ToolExecutionUpdateEvent): void {
-		if (!isRenderableTool(event.toolName) || event.toolName === 'read') {
-			return;
-		}
-
-		const args = event.args ?? (event.toolCallId ? this.conversationState.activeToolCallArgs.get(event.toolCallId) : undefined);
-		this.post({
-			type: 'upsertTool',
-			id: this.toolElementId(event.toolCallId),
-			toolName: event.toolName,
-			path: getToolHeaderDetail(event.toolName, args),
-			status: 'running',
-			body: getToolResultText(event.partialResult),
-		});
-	}
-
-	private showToolExecutionEnd(event: ToolExecutionEndEvent): void {
-		if (!isRenderableTool(event.toolName)) {
-			return;
-		}
-
-		const args = event.args ?? (event.toolCallId ? this.conversationState.activeToolCallArgs.get(event.toolCallId) : undefined);
-		const diff = typeof event.result?.details?.diff === 'string' ? event.result.details.diff : undefined;
-		this.post({
-			type: 'upsertTool',
-			id: this.toolElementId(event.toolCallId),
-			toolName: event.toolName,
-			path: getToolHeaderDetail(event.toolName, args, event.isError ? undefined : event.result),
-			status: event.isError ? 'error' : 'done',
-			body: event.toolName === 'read' ? undefined : diff ?? getToolResultText(event.result) ?? getToolBody(event.toolName, args),
-			isDiff: Boolean(diff),
-		});
-	}
-
-	private showStreamingUsage(event: MessageUpdateEvent): void {
-		if (event.message === undefined || !this.hasMessageUsage(event.message)) {
-			return;
-		}
-		this.conversationState.activeUsageMessage = event.message;
-		this.postCurrentUsageStatus();
-	}
-
-	private hasMessageUsage(message: unknown): boolean {
-		if (typeof message !== 'object' || message === null) {
-			return false;
-		}
-		const record = message as { usage?: unknown; message?: unknown };
-		const usage = record.usage ?? (typeof record.message === 'object' && record.message !== null ? (record.message as { usage?: unknown }).usage : undefined);
-		return typeof usage === 'object' && usage !== null;
-	}
-
-	private showStreamingThinking(event: MessageUpdateEvent): void {
-		const assistantEvent = event.assistantMessageEvent;
-		if (assistantEvent?.type === 'thinking_start') {
-			this.conversationState.activeThinkingMessageId = undefined;
-			return;
-		}
-
-		if (assistantEvent?.type === 'thinking_delta' && assistantEvent.delta) {
-			if (!this.conversationState.activeThinkingMessageId) {
-				this.conversationState.activeThinkingMessageId = this.createId('thinking');
-				this.post({ type: 'addThinking', id: this.conversationState.activeThinkingMessageId });
-			}
-			this.post({ type: 'appendThinking', id: this.conversationState.activeThinkingMessageId, text: assistantEvent.delta });
-		}
-	}
-
-	private showStreamingToolCall(event: MessageUpdateEvent): void {
-		const assistantEvent = event.assistantMessageEvent;
-		if (!assistantEvent?.type.startsWith('toolcall_')) {
-			return;
-		}
-
-		const toolCall = this.extractToolCall(event);
-		if (!isRenderableTool(toolCall.name)) {
-			return;
-		}
-
-		if (toolCall.id && toolCall.args !== undefined) {
-			this.conversationState.activeToolCallArgs.set(toolCall.id, toolCall.args);
-		}
-		const contentIndex = assistantEvent.contentIndex ?? 0;
-		const indexKey = `index:${contentIndex}`;
-		const toolKey = toolCall.id ? `id:${toolCall.id}` : indexKey;
-		const existingId = this.conversationState.activeToolCallIds.get(toolKey) ?? this.conversationState.activeToolCallIds.get(indexKey);
-		const id = toolCall.id ? this.toolElementId(toolCall.id) : existingId ?? this.createId('toolcall');
-		if (toolCall.id) {
-			const temporaryId = this.conversationState.activeToolCallIds.get(indexKey);
-			if (temporaryId && temporaryId !== id) {
-				this.post({ type: 'removeMessage', id: temporaryId });
-			}
-			this.conversationState.activeToolCallIds.delete(indexKey);
-		}
-		this.conversationState.activeToolCallIds.set(toolKey, id);
-		this.post({
-			type: 'upsertTool',
-			id,
-			toolName: toolCall.name,
-			path: getToolHeaderDetail(toolCall.name, toolCall.args),
-			status: assistantEvent.type === 'toolcall_end' ? 'pending' : 'drafting',
-			body: getToolBody(toolCall.name, toolCall.args),
-			isDiff: toolCall.name === 'edit',
-		});
-	}
-
-	private extractToolCall(event: MessageUpdateEvent): { id?: string; name?: string; args?: unknown } {
-		const assistantEvent = event.assistantMessageEvent;
-		const candidates = [
-			assistantEvent?.toolCall,
-			assistantEvent?.partial,
-			this.getMessageContentAt(event.message, assistantEvent?.contentIndex),
-		];
-		const candidate = candidates.find((value) => typeof value === 'object' && value !== null);
-		const record = candidate as { id?: unknown; name?: unknown; toolName?: unknown; arguments?: unknown; args?: unknown } | undefined;
-		return {
-			id: typeof record?.id === 'string' ? record.id : event.toolCallId,
-			name: typeof record?.name === 'string' ? record.name : typeof record?.toolName === 'string' ? record.toolName : undefined,
-			args: record?.arguments ?? record?.args,
-		};
-	}
-
-	private getMessageContentAt(message: unknown, contentIndex: number | undefined): unknown {
-		if (typeof message !== 'object' || message === null || contentIndex === undefined) {
-			return undefined;
-		}
-		const content = (message as { content?: unknown }).content;
-		return Array.isArray(content) ? content[contentIndex] : undefined;
-	}
-
-	private toolElementId(toolCallId: string | undefined): string {
-		return `tool-${toolCallId ?? this.createId('unknown')}`;
-	}
-
-	private formatSessionDate(date: Date): string {
-		return date.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
-	}
-
-	private truncate(text: string, maxLength: number): string {
-		return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+		this.conversationState.activeAbortIndicatorShown = true;
+		this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: `_${getAbortMessage(message)}_`, secondary: true });
 	}
 
 	private focusPrompt(): void {
@@ -1251,27 +686,13 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private post(message: unknown): void {
-		this.log('Posting webview message', this.getPostLogDetails(message));
+		this.log('Posting webview message', getPostLogDetails(message));
 		void this.panel.webview.postMessage(message);
 	}
 
-	private getPostLogDetails(message: unknown): Record<string, unknown> | undefined {
-		if (typeof message !== 'object' || message === null) {
-			return undefined;
-		}
-		const record = message as { type?: unknown; id?: unknown; role?: unknown; text?: unknown; status?: unknown };
-		return {
-			type: record.type,
-			id: record.id,
-			role: record.role,
-			status: record.status,
-			textLength: typeof record.text === 'string' ? record.text.length : undefined,
-		};
-	}
-
-	private postError(message: string, details?: unknown): void {
+private postError(message: string, details?: unknown): void {
 		this.log(message, details, 'error');
-		this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text: this.formatErrorForChat(message), error: true });
+		this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: formatErrorForChat(message), error: true });
 	}
 
 	private log(message: string, details?: unknown, level: CrustLogLevel = 'info'): void {
@@ -1284,29 +705,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.post({ type: 'sessionTitle', title });
 	}
 
-	private modelKey(model: Model): string {
-		return `${model.provider}/${model.id}`;
-	}
-
-	private modelLabel(model: Model): string {
-		return `${model.name ?? model.id} (${model.provider})`;
-	}
-
-	private getModelContextWindow(model: Model | null | undefined): number | undefined {
-		const contextWindow = (model as { contextWindow?: unknown } | null | undefined)?.contextWindow;
-		return typeof contextWindow === 'number' && Number.isFinite(contextWindow) ? contextWindow : undefined;
-	}
-
-	private getSessionPath(state: unknown): string | undefined {
-		const sessionFile = (state as { sessionFile?: unknown } | undefined)?.sessionFile;
-		return typeof sessionFile === 'string' ? sessionFile : undefined;
-	}
-
-	private createId(prefix: string): string {
-		return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-	}
-
-	private getIconPath(): vscode.Uri | { light: vscode.Uri; dark: vscode.Uri } {
+private getIconPath(): vscode.Uri | { light: vscode.Uri; dark: vscode.Uri } {
 		const icon = vscode.Uri.joinPath(this.context.extensionUri, 'branding', 'icon-small.svg');
 		return { light: icon, dark: icon };
 	}
