@@ -4,6 +4,14 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.6.2] - 2026-05-18
+
+- Improved provider error rendering in chat, including errors reported on `message_end` events.
+- Pretty-printed structured provider error payloads for easier diagnosis.
+- Refactored chat panel rendering and session restore logic into focused modules.
+- Expanded tests for Pi RPC client behavior, streaming event rendering, and session restore rendering.
+- Updated agent guidance for the current split chat panel architecture.
+
 ## [0.6.1] - 2026-05-18
 
 - Fixed false-positive model error notifications from normal streamed assistant text.
@@ -69,6 +77,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.6.2]: https://github.com/twcrews/crust/compare/0.6.1...0.6.2
 [0.6.1]: https://github.com/twcrews/crust/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/twcrews/crust/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/twcrews/crust/compare/0.4.0...0.5.0
