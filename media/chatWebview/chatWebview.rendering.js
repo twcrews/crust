@@ -590,7 +590,7 @@ function upsertTool(message) {
 	toolName.textContent = message.toolName ?? "tool";
 	header.append(toolName, document.createTextNode(path + formatToolStatus(message.status)));
 	header.title = headerText;
-	renderToolBody(body, message.body ?? "", Boolean(message.isDiff), message.path);
+	renderToolBody(body, message.body ?? "", Boolean(message.isDiff),);
 	body.hidden = !hasBody;
 	body.classList.toggle("diff", Boolean(message.isDiff));
 	keepLoadingAtBottom();
