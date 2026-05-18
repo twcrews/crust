@@ -13,7 +13,8 @@ export type RpcEvent = ModelSelectEvent
 	| ToolExecutionStartEvent
 	| ToolExecutionUpdateEvent
 	| ToolExecutionEndEvent
-	| MessageUpdateEvent;
+	| MessageUpdateEvent
+	| MessageEndEvent;
 
 export type ModelSelectEvent = {
 	type: 'model_select';
@@ -28,6 +29,7 @@ export type AgentStartEvent = {
 export type AgentEndEvent = {
 	type: 'agent_end';
 	message?: RpcMessage;
+	messages?: RpcMessage[];
 };
 
 export type ToolExecutionStartEvent = {
@@ -59,6 +61,11 @@ export type MessageUpdateEvent = {
 	message?: RpcMessage;
 	toolCallId?: string;
 	assistantMessageEvent?: AssistantMessageEvent;
+};
+
+export type MessageEndEvent = {
+	type: 'message_end';
+	message?: RpcMessage;
 };
 
 export type RpcMessage = Record<string, unknown> & {
@@ -170,7 +177,8 @@ export function isRpcEvent(message: unknown): message is RpcEvent {
 		case 'agent_start':
 			return true;
 		case 'agent_end':
-			return message.message === undefined || isRecord(message.message);
+			return (message.message === undefined || isRecord(message.message))
+				&& (message.messages === undefined || (Array.isArray(message.messages) && message.messages.every(isRecord)));
 		case 'tool_execution_start':
 			return true;
 		case 'tool_execution_update':
@@ -180,6 +188,8 @@ export function isRpcEvent(message: unknown): message is RpcEvent {
 		case 'message_update':
 			return (message.message === undefined || isRecord(message.message))
 				&& (message.assistantMessageEvent === undefined || isAssistantMessageEvent(message.assistantMessageEvent));
+		case 'message_end':
+			return message.message === undefined || isRecord(message.message);
 		default:
 			return false;
 	}

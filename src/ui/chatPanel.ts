@@ -935,12 +935,8 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		if (event.type === 'agent_end') {
-			this.showAbortIndicator(event.message);
-			const errorMessage = this.getAssistantErrorMessage(event.message);
-			if (errorMessage) {
-				this.showAssistantErrorInChat(errorMessage);
-				this.showModelConnectionToast(errorMessage);
-			}
+			const assistantMessage = event.message ?? this.getLastAssistantMessage(event.messages);
+			this.handleTerminalAssistantMessage(assistantMessage);
 			this.setProcessing(false);
 			this.conversationState.isStreaming = false;
 			this.conversationState.activeThinkingMessageId = undefined;
@@ -948,7 +944,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.conversationState.activeToolCallArgs.clear();
 			this.conversationState.activeTextMessageIds.clear();
 			this.removeActiveLoadingMessage();
-			this.finalizeUsageStatus(event.message);
+			this.finalizeUsageStatus(assistantMessage);
 			void this.postCurrentSessionPath();
 			void this.refreshCurrentModel();
 			return;
@@ -966,6 +962,12 @@ export class CrustChatPanel implements vscode.Disposable {
 
 		if (event.type === 'tool_execution_end') {
 			this.showToolExecutionEnd(event);
+			return;
+		}
+
+		if (event.type === 'message_end') {
+			this.handleTerminalAssistantMessage(event.message);
+			this.finalizeUsageStatus(event.message);
 			return;
 		}
 
@@ -993,12 +995,29 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 
+	private handleTerminalAssistantMessage(message: unknown): void {
+		this.showAbortIndicator(message);
+		const errorMessage = this.getAssistantErrorMessage(message);
+		if (!errorMessage) {
+			return;
+		}
+		this.showAssistantErrorInChat(errorMessage);
+		this.showModelConnectionToast(errorMessage);
+	}
+
 	private showAssistantErrorInChat(message: string, contentIndex = 0): void {
 		if (this.conversationState.activeErrorMessageShown) {
 			return;
 		}
 		this.conversationState.activeErrorMessageShown = true;
 		this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(contentIndex), text: `\nError: ${message}`, error: true });
+	}
+
+	private getLastAssistantMessage(messages: unknown): unknown {
+		if (!Array.isArray(messages)) {
+			return undefined;
+		}
+		return messages.slice().reverse().find((message) => getMessageRole(message) === 'assistant');
 	}
 
 	private showAbortIndicator(message: unknown): void {
