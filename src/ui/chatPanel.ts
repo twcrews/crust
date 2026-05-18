@@ -898,7 +898,6 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private handlePiEvent(event: RpcEvent): void {
-		this.log('Received Pi event', { type: event.type, assistantEventType: event.assistantMessageEvent?.type, toolName: event.toolName });
 		this.maybeShowModelErrorFromValue(event);
 		if (event.type === 'model_select' && event.model) {
 			this.setCurrentModel(event.model);

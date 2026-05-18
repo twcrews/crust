@@ -173,7 +173,6 @@ export class PiRpcClient implements vscode.Disposable {
 			if (isRpcResponse(message)) {
 				this.handleResponse(message);
 			} else if (isRpcEvent(message)) {
-				this.log('Received Pi RPC event', { type: message.type, assistantEventType: message.assistantMessageEvent?.type, toolName: message.toolName });
 				this.eventEmitter.fire(message);
 			}
 		} catch (error) {
