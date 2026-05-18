@@ -4,6 +4,15 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.6.0] - 2026-05-18
+
+- Added support for multiple concurrent Crust chat instances, including restored session paths per tab.
+- Added structured Crust logging utilities and forwarded webview log levels for easier debugging.
+- Improved Pi RPC error handling, including clearer subscription-related errors.
+- Reduced routine logging verbosity while keeping critical errors visible.
+- Expanded runtime guards and tests for RPC events, webview messages, path autocomplete, and restored sessions.
+- Updated release staging instructions and agent guidance.
+
 ## [0.5.0] - 2026-05-17
 
 - Added terminal-style prompt history recall and keyboard shortcuts for prompt cancellation.
@@ -55,6 +64,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.6.0]: https://github.com/twcrews/crust/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/twcrews/crust/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/twcrews/crust/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/twcrews/crust/compare/0.2.0...0.3.0
