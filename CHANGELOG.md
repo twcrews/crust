@@ -4,6 +4,13 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.5.0] - 2026-05-17
+
+- Added terminal-style prompt history recall and keyboard shortcuts for prompt cancellation.
+- Forwarded critical Pi RPC errors to VS Code notification toasts.
+- Improved `read` tool output rendering with line number information.
+- Expanded tests for prompt shortcuts and tool output formatting.
+
 ## [0.4.0] - 2026-05-16
 
 - Added automatic restoration for persisted Crust chat tabs when VS Code windows load.
@@ -48,10 +55,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
-[0.4.0](https://github.com/twcrews/crust/compare/0.3.0...0.4.0)
-[0.3.0](https://github.com/twcrews/crust/compare/0.2.0...0.3.0)
-[0.2.0](https://github.com/twcrews/crust/compare/0.1.0...0.2.0)
-[0.1.0](https://github.com/twcrews/crust/compare/0.0.3...0.1.0)
-[0.0.3](https://github.com/twcrews/crust/compare/0.0.2...0.0.3)
-[0.0.2](https://github.com/twcrews/crust/compare/0.0.1...0.0.2)
-[0.0.1](https://github.com/twcrews/crust/tree/0.0.1)
+[0.5.0]: https://github.com/twcrews/crust/compare/0.4.0...0.5.0
+[0.4.0]: https://github.com/twcrews/crust/compare/0.3.0...0.4.0
+[0.3.0]: https://github.com/twcrews/crust/compare/0.2.0...0.3.0
+[0.2.0]: https://github.com/twcrews/crust/compare/0.1.0...0.2.0
+[0.1.0]: https://github.com/twcrews/crust/compare/0.0.3...0.1.0
+[0.0.3]: https://github.com/twcrews/crust/compare/0.0.2...0.0.3
+[0.0.2]: https://github.com/twcrews/crust/compare/0.0.1...0.0.2
+[0.0.1]: https://github.com/twcrews/crust/tree/0.0.1
