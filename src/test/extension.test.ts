@@ -11,6 +11,7 @@ import { createConversationState } from '../ui/conversationState';
 import { buildPromptWithIdeContext, extractRestoredPrompt, formatSelectionRange, getIdeContext } from '../ui/ideContext';
 import { getMessageContent, getBlockText, getBlockType, getEntryTimestamp, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from '../ui/messageUtils';
 import { restoreSessionMessages } from '../ui/sessionRestoreRenderer';
+import { getBuiltinSlashCommands } from '../ui/slashCommands';
 import { StreamingEventRenderer } from '../ui/streamingEventRenderer';
 import { getPathSuggestions } from '../ui/pathAutocomplete';
 import { listSessions } from '../ui/sessionHistory';
@@ -114,6 +115,49 @@ suite('Pi RPC client', () => {
 		await client.abort();
 
 		assert.deepStrictEqual(sentTypes, ['steer', 'abort']);
+	});
+
+	test('returns compact response data from Pi RPC', async () => {
+		type TestableClient = {
+			start: () => Promise<void>;
+			process?: { stdin: { write: (payload: string, callback: (error?: Error) => void) => void } };
+			handleStdout: (chunk: string) => void;
+		};
+
+		const client = new PiRpcClient(undefined);
+		const testable = client as unknown as TestableClient;
+		const sent: unknown[] = [];
+		testable.start = async () => {
+			testable.process = {
+				stdin: {
+					write: (payload, callback) => {
+						const command = JSON.parse(payload) as { id: string; type: string; customInstructions?: string };
+						sent.push(command);
+						callback();
+						testable.handleStdout(`${JSON.stringify({ type: 'response', id: command.id, command: command.type, success: true, data: { summary: 'Kept important context', tokensBefore: 12345 } })}\n`);
+					},
+				},
+			};
+		};
+
+		const result = await client.compact('focus on tests');
+
+		assert.deepStrictEqual(result, { summary: 'Kept important context', tokensBefore: 12345 });
+		assert.deepStrictEqual(sent, [{ id: (sent[0] as { id: string }).id, type: 'compact', customInstructions: 'focus on tests' }]);
+	});
+});
+
+suite('Slash commands', () => {
+	test('falls back to built-in commands when Pi slash metadata cannot be loaded', async () => {
+		const originalPath = process.env.PATH;
+		process.env.PATH = '';
+		try {
+			const commands = await getBuiltinSlashCommands(() => undefined);
+			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'name', 'resume', 'model']);
+			assert.ok(commands.every((command) => command.source === 'builtin'));
+		} finally {
+			process.env.PATH = originalPath;
+		}
 	});
 });
 
