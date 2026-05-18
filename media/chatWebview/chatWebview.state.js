@@ -34,6 +34,10 @@ let autocompleteMode = "";
 let pathAutocompleteRequestId = 0;
 let latestPathAutocompleteRequestId = 0;
 let slashCommandRefreshTimer = 0;
+let promptHistory = Array.isArray(persistedWebviewState.promptHistory) ? persistedWebviewState.promptHistory.filter((entry) => typeof entry === "string" && entry.trim()) : [];
+let promptHistoryCursor = promptHistory.length;
+let promptHistoryDraft = "";
+let restoringPromptHistory = false;
 
 const emptyStateFlavorTexts = [
 	"Fun fact: this extension was almost named 'Circumference'!",

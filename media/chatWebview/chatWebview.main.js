@@ -29,6 +29,7 @@ form.addEventListener("submit", (event) => {
 	if (!text.trim()) {
 		return;
 	}
+	recordPromptHistory(text);
 	if (!piProcessing && runSlashCommand(text)) {
 		return;
 	}
@@ -51,9 +52,29 @@ submit.addEventListener("click", (event) => {
 		return;
 	}
 	event.preventDefault();
-	logWebview("Cancelling prompt");
-	vscode.postMessage({ type: "cancel" });
+	requestCancelCurrentTask("button");
 });
+
+document.addEventListener("keydown", (event) => {
+	if (event.key.toLowerCase() !== "c" || !event.ctrlKey || event.shiftKey || event.altKey || event.metaKey || !piProcessing || hasCopyableSelection()) {
+		return;
+	}
+	event.preventDefault();
+	requestCancelCurrentTask("keyboard");
+});
+
+function requestCancelCurrentTask(source) {
+	logWebview("Cancelling prompt", { source });
+	vscode.postMessage({ type: "cancel" });
+}
+
+function hasCopyableSelection() {
+	if (document.activeElement === prompt && prompt.selectionStart !== prompt.selectionEnd) {
+		return true;
+	}
+	const selection = window.getSelection();
+	return Boolean(selection && !selection.isCollapsed && selection.toString());
+}
 
 function setProcessing(isProcessing) {
 	piProcessing = Boolean(isProcessing);
@@ -69,6 +90,10 @@ function updateSubmitButton() {
 }
 
 prompt.addEventListener("input", () => {
+	if (!restoringPromptHistory) {
+		promptHistoryCursor = promptHistory.length;
+		promptHistoryDraft = "";
+	}
 	autoResizePrompt();
 	updateSlashAutocomplete();
 	updateSubmitButton();
@@ -78,10 +103,83 @@ prompt.addEventListener("blur", () => {
 	window.setTimeout(hideSlashAutocomplete, 100);
 });
 
+function recordPromptHistory(text) {
+	const entry = text.trim();
+	if (!entry || promptHistory[promptHistory.length - 1] === entry) {
+		promptHistoryCursor = promptHistory.length;
+		return;
+	}
+	promptHistory.push(entry);
+	if (promptHistory.length > 100) {
+		promptHistory = promptHistory.slice(-100);
+	}
+	promptHistoryCursor = promptHistory.length;
+	promptHistoryDraft = "";
+	updatePersistedWebviewState({ promptHistory });
+}
+
+function handlePromptHistoryKeydown(event) {
+	if ((event.key !== "ArrowUp" && event.key !== "ArrowDown") || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
+		return false;
+	}
+	if (event.key === "ArrowUp") {
+		if (!isCursorBeforePromptText() || promptHistory.length === 0) {
+			return false;
+		}
+		if (promptHistoryCursor === promptHistory.length) {
+			promptHistoryDraft = prompt.value;
+		}
+		if (promptHistoryCursor <= 0) {
+			return false;
+		}
+		setPromptFromHistory(promptHistoryCursor - 1);
+		event.preventDefault();
+		return true;
+	}
+	if (!isCursorAfterPromptText() || promptHistoryCursor >= promptHistory.length) {
+		return false;
+	}
+	event.preventDefault();
+	if (promptHistoryCursor === promptHistory.length - 1) {
+		setPromptValueFromHistory(promptHistoryDraft);
+		promptHistoryCursor = promptHistory.length;
+		promptHistoryDraft = "";
+		return true;
+	}
+	setPromptFromHistory(promptHistoryCursor + 1);
+	return true;
+}
+
+function isCursorBeforePromptText() {
+	return prompt.selectionStart === 0 && prompt.selectionEnd === 0;
+}
+
+function isCursorAfterPromptText() {
+	return prompt.selectionStart === prompt.value.length && prompt.selectionEnd === prompt.value.length;
+}
+
+function setPromptFromHistory(index) {
+	promptHistoryCursor = index;
+	setPromptValueFromHistory(promptHistory[index] ?? "");
+}
+
+function setPromptValueFromHistory(value) {
+	restoringPromptHistory = true;
+	prompt.value = value;
+	prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+	autoResizePrompt();
+	updateSlashAutocomplete();
+	updateSubmitButton();
+	restoringPromptHistory = false;
+}
+
 ideContext.addEventListener("click", toggleIdeContext);
 
 prompt.addEventListener("keydown", (event) => {
 	if (handleSlashAutocompleteKeydown(event)) {
+		return;
+	}
+	if (handlePromptHistoryKeydown(event)) {
 		return;
 	}
 	if (event.key === "Enter" && !event.shiftKey) {
@@ -166,6 +264,9 @@ window.addEventListener("message", (event) => {
 		updateEmptyState();
 	}
 	if (message.type === "addMessage") {
+		if (message.role === "user") {
+			recordPromptHistory(message.text ?? "");
+		}
 		addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "", message.slashCommandLabel ?? "", message.secondary === true);
 	}
 	if (message.type === "appendMessage") {
