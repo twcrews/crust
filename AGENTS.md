@@ -13,7 +13,7 @@ The project has a real implementation rather than only VS Code template code. Th
 - `src/extension.ts` contains extension activation and command registration only.
 - `src/pi/piRpcClient.ts` owns the Pi RPC child process, JSONL request/response handling, event forwarding, supported RPC commands (`prompt`, `steer`, abort, model/session changes, compact, slash command discovery), and RPC logging.
 - `src/pi/rpcTypes.ts` contains lightweight runtime guards and shared Pi RPC types, including typed tool result/event shapes.
-- `src/ui/chatPanel.ts` coordinates each VS Code webview panel, Pi RPC client, session restore/new chat, model/status/usage updates, IDE context injection, slash commands, `@` path autocomplete, streaming messages, thinking blocks, task cancellation/steering, and tool cards/diffs.
+- `src/ui/chatPanel.ts` coordinates each VS Code webview panel, Pi RPC client, session restore/new chat, model/status/usage updates, IDE context injection, slash commands, `@` path autocomplete, streaming messages, thinking blocks, task cancellation/steering, tool cards/diffs, and targeted model-connection error notifications.
 - `src/ui/chatTypes.ts`, `ideContext.ts`, `messageUtils.ts`, `pathAutocomplete.ts`, `sessionHistory.ts`, `toolUtils.ts`, and `usageStatus.ts` hold focused UI-side parsing, formatting, session, filesystem, and tool helpers.
 - `src/ui/chatWebview.ts` loads the static webview template and injects CSP nonce/resource URIs.
 - `src/utils/crustLogger.ts`, `errorMessage.ts`, and `nonce.ts` provide output-channel logging, error stringification, and CSP nonce generation.
@@ -50,3 +50,4 @@ npm run check-webview
 - Avoid adding large generated artifacts unless they are required by the extension packaging workflow.
 - Keep documentation updated as features move beyond the current implementation.
 - Logs are available in the `Crust` and `Crust Pi RPC` output channels when debugging extension/Pi behavior.
+- Keep model/provider error notifications targeted to explicit assistant errors and provider failure messages; avoid recursively scanning arbitrary event payloads because normal message text can otherwise trigger false-positive error toasts.
