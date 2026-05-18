@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { watch, type FSWatcher } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -40,6 +41,9 @@ export class CrustChatPanel implements vscode.Disposable {
 	private lastActiveTextEditor = vscode.window.activeTextEditor;
 	private piSlashCommands: SlashCommand[] = [];
 	private builtinSlashCommands: SlashCommand[] = [];
+	private activeSessionPath: string | undefined;
+	private sessionWatcher: FSWatcher | undefined;
+	private sessionWatcherTimer: NodeJS.Timeout | undefined;
 
 	static show(context: vscode.ExtensionContext): void {
 		void CrustChatPanel.open(context);
@@ -106,6 +110,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	dispose(): void {
 		this.log('Disposing chat panel');
 		this.client.dispose();
+		this.disposeSessionWatcher();
 		while (this.disposables.length) {
 			this.disposables.pop()?.dispose();
 		}
@@ -162,9 +167,11 @@ export class CrustChatPanel implements vscode.Disposable {
 			const currentModel = (state as { model?: Model | null } | undefined)?.model;
 			this.currentModel = currentModel ?? undefined;
 			this.contextWindow = this.getModelContextWindow(currentModel);
-			this.post({ type: 'sessionPath', sessionPath: this.getSessionPath(state) });
+			const sessionPath = this.getSessionPath(state);
+			this.post({ type: 'sessionPath', sessionPath });
+			this.watchSessionFile(sessionPath);
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
-			this.post({ type: 'models', models, selected: currentModel ? this.modelKey(currentModel) : undefined });
+			this.postModels();
 			this.postSlashCommands();
 			if (this.restoredSessionPath && messages.length) {
 				await this.restoreMessages(messages);
@@ -668,10 +675,125 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private async postCurrentSessionPath(): Promise<void> {
 		try {
-			this.post({ type: 'sessionPath', sessionPath: this.getSessionPath(await this.client.getState()) });
+			const sessionPath = this.getSessionPath(await this.client.getState());
+			this.post({ type: 'sessionPath', sessionPath });
+			this.watchSessionFile(sessionPath);
 		} catch (error) {
 			this.log('Failed to post current session path', { error: error instanceof Error ? error.message : String(error) });
 		}
+	}
+
+	private setCurrentModel(model: Model | undefined): void {
+		const previousKey = this.currentModel ? this.modelKey(this.currentModel) : undefined;
+		const nextKey = model ? this.modelKey(model) : undefined;
+		this.currentModel = model;
+		this.contextWindow = this.getModelContextWindow(model);
+		if (previousKey !== nextKey) {
+			this.log('Current model changed', { previous: previousKey, current: nextKey });
+		}
+		this.postModels();
+		if (this.usageMessages.length) {
+			this.postCurrentUsageStatus();
+		}
+	}
+
+	private postModels(): void {
+		const models = [...this.models];
+		if (this.currentModel && !models.some((model) => this.modelKey(model) === this.modelKey(this.currentModel!))) {
+			models.push(this.currentModel);
+		}
+		this.post({ type: 'models', models, selected: this.currentModel ? this.modelKey(this.currentModel) : undefined });
+	}
+
+	private async refreshCurrentModel(): Promise<void> {
+		if (await this.refreshCurrentModelFromSessionFile()) {
+			return;
+		}
+		try {
+			const state = await this.client.getState();
+			const model = (state as { model?: Model | null } | undefined)?.model ?? undefined;
+			if (model) {
+				this.setCurrentModel(model);
+			}
+		} catch (error) {
+			this.log('Failed to refresh current model from Pi state', { error: error instanceof Error ? error.message : String(error) });
+		}
+	}
+
+	private async refreshCurrentModelFromSessionFile(): Promise<boolean> {
+		if (!this.activeSessionPath) {
+			return false;
+		}
+		try {
+			const text = await readFile(this.activeSessionPath, 'utf8');
+			const model = this.getLastModelFromSessionText(text);
+			if (!model) {
+				return false;
+			}
+			this.setCurrentModel(model);
+			return true;
+		} catch (error) {
+			this.log('Failed to refresh current model from session file', { error: error instanceof Error ? error.message : String(error), path: this.activeSessionPath });
+			return false;
+		}
+	}
+
+	private getLastModelFromSessionText(text: string): Model | undefined {
+		let latest: Model | undefined;
+		for (const line of text.split(/\r?\n/)) {
+			const entry = parseJsonObject(line);
+			if (!entry) {
+				continue;
+			}
+			if (entry.type === 'model_change' && typeof entry.provider === 'string' && typeof entry.modelId === 'string') {
+				latest = this.findKnownModel(entry.provider, entry.modelId) ?? { provider: entry.provider, id: entry.modelId };
+				continue;
+			}
+			const message = entry.message;
+			if (entry.type === 'message' && getMessageRole(message) === 'assistant' && typeof (message as { provider?: unknown }).provider === 'string' && typeof (message as { model?: unknown }).model === 'string') {
+				const provider = (message as { provider: string }).provider;
+				const modelId = (message as { model: string }).model;
+				latest = this.findKnownModel(provider, modelId) ?? { provider, id: modelId };
+			}
+		}
+		return latest;
+	}
+
+	private findKnownModel(provider: string, modelId: string): Model | undefined {
+		return this.models.find((model) => model.provider === provider && model.id === modelId);
+	}
+
+	private watchSessionFile(sessionPath: string | undefined): void {
+		if (this.activeSessionPath === sessionPath) {
+			return;
+		}
+		this.disposeSessionWatcher();
+		this.activeSessionPath = sessionPath;
+		if (!sessionPath) {
+			return;
+		}
+		try {
+			this.sessionWatcher = watch(sessionPath, () => {
+				if (this.sessionWatcherTimer) {
+					clearTimeout(this.sessionWatcherTimer);
+				}
+				this.sessionWatcherTimer = setTimeout(() => {
+					this.sessionWatcherTimer = undefined;
+					void this.refreshCurrentModelFromSessionFile();
+				}, 100);
+			});
+		} catch (error) {
+			this.log('Failed to watch session file for model changes', { error: error instanceof Error ? error.message : String(error), path: sessionPath });
+		}
+	}
+
+	private disposeSessionWatcher(): void {
+		if (this.sessionWatcherTimer) {
+			clearTimeout(this.sessionWatcherTimer);
+			this.sessionWatcherTimer = undefined;
+		}
+		this.sessionWatcher?.close();
+		this.sessionWatcher = undefined;
 	}
 
 	private async submitPrompt(text: string, includeIdeContext: boolean, display?: { text?: string; slashCommandLabel?: string }): Promise<void> {
@@ -683,6 +805,8 @@ export class CrustChatPanel implements vscode.Disposable {
 		if (!trimmed) {
 			return;
 		}
+
+		await this.refreshCurrentModel();
 
 		if (!this.hasSessionTitle) {
 			this.setSessionTitleFromPrompt(display?.slashCommandLabel ?? displayText);
@@ -764,8 +888,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 		try {
 			await this.client.setModel(model);
-			this.currentModel = model;
-			this.contextWindow = this.getModelContextWindow(model);
+			this.setCurrentModel(model);
 			await this.postSessionStatus(await this.client.getMessages());
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -776,6 +899,11 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private handlePiEvent(event: RpcEvent): void {
 		this.log('Received Pi event', { type: event.type, assistantEventType: event.assistantMessageEvent?.type, toolName: event.toolName });
+		this.maybeShowModelErrorFromValue(event);
+		if (event.type === 'model_select' && event.model) {
+			this.setCurrentModel(event.model);
+			return;
+		}
 		if (event.type === 'agent_start') {
 			this.setProcessing(true);
 			this.isStreaming = true;
@@ -802,6 +930,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.removeActiveLoadingMessage();
 			void this.refreshUsageStatus();
 			void this.postCurrentSessionPath();
+			void this.refreshCurrentModel();
 			return;
 		}
 
@@ -853,13 +982,67 @@ export class CrustChatPanel implements vscode.Disposable {
 		if (typeof message !== 'object' || message === null) {
 			return undefined;
 		}
-		const record = message as { errorMessage?: unknown; error?: unknown; stopReason?: unknown };
+		const record = message as { errorMessage?: unknown; error?: unknown; reason?: unknown; message?: unknown; stopReason?: unknown };
 		const errorMessage = typeof record.errorMessage === 'string' ? record.errorMessage : undefined;
 		const error = typeof record.error === 'string' ? record.error : undefined;
+		const reason = typeof record.reason === 'string' ? record.reason : undefined;
+		const nestedMessage = typeof record.message === 'string' ? record.message : undefined;
 		if (record.stopReason === 'aborted' && errorMessage === 'Request was aborted') {
 			return undefined;
 		}
-		return errorMessage || error;
+		return errorMessage || error || reason || nestedMessage;
+	}
+
+	private maybeShowModelErrorFromValue(value: unknown): void {
+		const message = this.findModelErrorMessage(value);
+		if (message) {
+			this.maybeShowModelConnectionToast(message);
+		}
+	}
+
+	private findModelErrorMessage(value: unknown, seen = new WeakSet<object>(), depth = 0): string | undefined {
+		if (depth > 5 || value === undefined || value === null) {
+			return undefined;
+		}
+
+		if (typeof value === 'string') {
+			return this.isModelConnectionError(value) ? value : undefined;
+		}
+
+		if (typeof value !== 'object') {
+			return undefined;
+		}
+
+		if (seen.has(value)) {
+			return undefined;
+		}
+		seen.add(value);
+
+		const direct = this.getAssistantErrorMessage(value);
+		if (direct && this.isModelConnectionError(direct)) {
+			return direct;
+		}
+
+		if (Array.isArray(value)) {
+			for (const item of value) {
+				const found = this.findModelErrorMessage(item, seen, depth + 1);
+				if (found) {
+					return found;
+				}
+			}
+			return undefined;
+		}
+
+		for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+			if (!/error|reason|message|content|assistantMessageEvent|partial/i.test(key)) {
+				continue;
+			}
+			const found = this.findModelErrorMessage(child, seen, depth + 1);
+			if (found) {
+				return found;
+			}
+		}
+		return undefined;
 	}
 
 	private isAbortedAssistantMessage(message: unknown): boolean {

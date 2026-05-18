@@ -10,6 +10,8 @@ export type RpcResponse = {
 export type RpcEvent = {
 	type: string;
 	message?: unknown;
+	model?: Model;
+	previousModel?: Model;
 	toolCallId?: string;
 	toolName?: string;
 	args?: unknown;
