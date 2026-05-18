@@ -136,3 +136,6 @@
 .message.secondary {
 	color: var(--vscode-descriptionForeground);
 }
+.message.error-message {
+	color: var(--vscode-errorForeground);
+}

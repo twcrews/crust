@@ -25,10 +25,10 @@ function setModels(models, selected) {
 	}
 }
 
-function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel, secondary) {
+function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel, secondary, error) {
 	const element = document.createElement("div");
 	element.id = id;
-	element.className = "message " + role + (loading ? " loading" : "") + (secondary ? " secondary" : "");
+	element.className = "message " + role + (loading ? " loading" : "") + (secondary ? " secondary" : "") + (error ? " error-message" : "");
 	if (role === "assistant" && !loading) {
 		setMarkdownContent(element, text);
 	} else if (role === "user") {
@@ -149,12 +149,15 @@ function createEyeIcon() {
 	return svg;
 }
 
-function appendMessage(id, text) {
+function appendMessage(id, text, error) {
 	const element = document.getElementById(id);
 	if (!element) {
 		return;
 	}
 	element.classList.remove("loading");
+	if (error) {
+		element.classList.add("error-message");
+	}
 	if (element.classList.contains("assistant")) {
 		setMarkdownContent(element, (element.dataset.markdown ?? "") + text);
 	} else if (element.classList.contains("user")) {

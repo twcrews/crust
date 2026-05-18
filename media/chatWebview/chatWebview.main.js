@@ -255,7 +255,7 @@ function parseExtensionMessage(value) {
 			return typeof value.id === "string" && (value.role === "user" || value.role === "assistant") ? value : null;
 		case "appendMessage":
 		case "appendThinking":
-			return typeof value.id === "string" ? { type: value.type, id: value.id, text: stringValue(value.text) } : null;
+			return typeof value.id === "string" ? { type: value.type, id: value.id, text: stringValue(value.text), error: value.error === true } : null;
 		case "removeMessage":
 		case "addThinking":
 			return idMessage();
@@ -317,10 +317,10 @@ window.addEventListener("message", (event) => {
 			if (message.role === "user") {
 				recordPromptHistory(message.text ?? "");
 			}
-			addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "", message.slashCommandLabel ?? "", message.secondary === true);
+			addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "", message.slashCommandLabel ?? "", message.secondary === true, message.error === true);
 			break;
 		case "appendMessage":
-			appendMessage(message.id, message.text);
+			appendMessage(message.id, message.text, message.error === true);
 			break;
 		case "removeMessage":
 			removeMessage(message.id);

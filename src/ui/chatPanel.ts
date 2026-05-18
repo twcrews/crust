@@ -29,6 +29,7 @@ type ConversationState = {
 	activeToolCallArgs: Map<string, unknown>;
 	activeTextMessageIds: Map<number, string>;
 	activeAbortIndicatorShown: boolean;
+	activeErrorMessageShown: boolean;
 	usageMessages: unknown[];
 	activeUsageMessage: unknown;
 };
@@ -44,6 +45,7 @@ function createConversationState(): ConversationState {
 		activeToolCallArgs: new Map<string, unknown>(),
 		activeTextMessageIds: new Map<number, string>(),
 		activeAbortIndicatorShown: false,
+		activeErrorMessageShown: false,
 		usageMessages: [],
 		activeUsageMessage: undefined,
 	};
@@ -834,6 +836,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.conversationState.activeLoadingMessageId = this.createId('loading');
 		this.conversationState.activeTextMessageIds.clear();
 		this.conversationState.activeAbortIndicatorShown = false;
+		this.conversationState.activeErrorMessageShown = false;
 		this.post({ type: 'addMessage', id: userMessageId, role: 'user', text: displayText, ideContextLabel: ideContext?.label, slashCommandLabel: display?.slashCommandLabel });
 		this.post({ type: 'addMessage', id: this.conversationState.activeLoadingMessageId, role: 'assistant', text: '', loading: true });
 		this.setProcessing(true);
@@ -848,7 +851,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			const message = errorMessage(error);
 			this.log('Prompt failed', { error: message }, 'error');
 			const assistantMessageId = this.getStreamingTextMessageId(0);
-			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\nError: ${message}` });
+			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\nError: ${message}`, error: true });
 			this.removeActiveLoadingMessage();
 			this.setProcessing(false);
 		}
@@ -927,6 +930,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.conversationState.activeToolCallArgs.clear();
 			this.conversationState.activeTextMessageIds.clear();
 			this.conversationState.activeAbortIndicatorShown = false;
+			this.conversationState.activeErrorMessageShown = false;
 			return;
 		}
 
@@ -934,6 +938,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.showAbortIndicator(event.message);
 			const errorMessage = this.getAssistantErrorMessage(event.message);
 			if (errorMessage) {
+				this.showAssistantErrorInChat(errorMessage);
 				this.showModelConnectionToast(errorMessage);
 			}
 			this.setProcessing(false);
@@ -981,11 +986,19 @@ export class CrustChatPanel implements vscode.Disposable {
 		if (assistantEvent?.type === 'error') {
 			const assistantErrorMessage = this.getAssistantErrorMessage(event.message);
 			const message = assistantErrorMessage ?? assistantEvent.reason ?? 'unknown error';
-			this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(assistantEvent.contentIndex ?? 0), text: `\nError: ${message}` });
+			this.showAssistantErrorInChat(message, assistantEvent.contentIndex ?? 0);
 			if (assistantErrorMessage) {
 				this.showModelConnectionToast(assistantErrorMessage);
 			}
 		}
+	}
+
+	private showAssistantErrorInChat(message: string, contentIndex = 0): void {
+		if (this.conversationState.activeErrorMessageShown) {
+			return;
+		}
+		this.conversationState.activeErrorMessageShown = true;
+		this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(contentIndex), text: `\nError: ${message}`, error: true });
 	}
 
 	private showAbortIndicator(message: unknown): void {
@@ -1237,7 +1250,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private postError(message: string, details?: unknown): void {
 		this.log(message, details, 'error');
-		this.post({ type: 'error', message });
+		this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text: `Error: ${message}`, error: true });
 	}
 
 	private log(message: string, details?: unknown, level: CrustLogLevel = 'info'): void {
