@@ -280,22 +280,6 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.log('Showing Pi not installed notification', { error: details });
 	}
 
-	private showModelConnectionToast(message: string): void {
-		const key = `model-connection:${this.currentModel ? this.modelKey(this.currentModel) : 'unknown'}:${message}`;
-		if (!this.trackActiveNotification(key)) {
-			return;
-		}
-		const modelLabel = this.currentModel ? this.modelLabel(this.currentModel) : 'the selected model';
-		void Promise.resolve(vscode.window.showErrorMessage(`Crust received an error from ${modelLabel}. ${message}`, 'Switch Model', 'Open Logs')).then((action) => {
-			if (action === 'Switch Model') {
-				this.post({ type: 'focusModel' });
-			}
-			if (action === 'Open Logs') {
-				this.output.show();
-			}
-		}).finally(() => this.notifiedErrors.delete(key));
-	}
-
 	private trackActiveNotification(key: string): boolean {
 		if (this.notifiedErrors.has(key)) {
 			return false;
@@ -851,7 +835,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			const message = errorMessage(error);
 			this.log('Prompt failed', { error: message }, 'error');
 			const assistantMessageId = this.getStreamingTextMessageId(0);
-			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\nError: ${message}`, error: true });
+			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\n${this.formatErrorForChat(message)}`, error: true });
 			this.removeActiveLoadingMessage();
 			this.setProcessing(false);
 		}
@@ -911,9 +895,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.setCurrentModel(model);
 			await this.postSessionStatus(await this.client.getMessages());
 		} catch (error) {
-			const message = errorMessage(error);
-			this.postError(message, { operation: 'selectModel' });
-			this.showModelConnectionToast(message);
+			this.postError(errorMessage(error), { operation: 'selectModel' });
 		}
 	}
 
@@ -989,9 +971,6 @@ export class CrustChatPanel implements vscode.Disposable {
 			const assistantErrorMessage = this.getAssistantErrorMessage(event.message);
 			const message = assistantErrorMessage ?? assistantEvent.reason ?? 'unknown error';
 			this.showAssistantErrorInChat(message, assistantEvent.contentIndex ?? 0);
-			if (assistantErrorMessage) {
-				this.showModelConnectionToast(assistantErrorMessage);
-			}
 		}
 	}
 
@@ -1002,7 +981,6 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 		this.showAssistantErrorInChat(errorMessage);
-		this.showModelConnectionToast(errorMessage);
 	}
 
 	private showAssistantErrorInChat(message: string, contentIndex = 0): void {
@@ -1010,7 +988,31 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 		this.conversationState.activeErrorMessageShown = true;
-		this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(contentIndex), text: `\nError: ${message}`, error: true });
+		this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(contentIndex), text: `\n${this.formatErrorForChat(message)}`, error: true });
+	}
+
+	private formatErrorForChat(message: string): string {
+		const pretty = this.tryPrettyPrintJsonError(message);
+		return `Error: ${pretty}`;
+	}
+
+	private tryPrettyPrintJsonError(message: string): string {
+		const jsonStart = [...message]
+			.map((char, index) => (char === '{' || char === '[' ? index : -1))
+			.find((index) => index >= 0);
+		if (jsonStart === undefined) {
+			return message;
+		}
+
+		const prefix = message.slice(0, jsonStart).trim();
+		const jsonText = message.slice(jsonStart).trim();
+		try {
+			const parsed = JSON.parse(jsonText) as unknown;
+			const formattedJson = JSON.stringify(parsed, null, 2);
+			return `${prefix ? `${prefix}\n` : ''}\n\`\`\`json\n${formattedJson}\n\`\`\``;
+		} catch {
+			return message;
+		}
 	}
 
 	private getLastAssistantMessage(messages: unknown): unknown {
@@ -1269,7 +1271,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private postError(message: string, details?: unknown): void {
 		this.log(message, details, 'error');
-		this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text: `Error: ${message}`, error: true });
+		this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text: this.formatErrorForChat(message), error: true });
 	}
 
 	private log(message: string, details?: unknown, level: CrustLogLevel = 'info'): void {
