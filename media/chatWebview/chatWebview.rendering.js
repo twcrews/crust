@@ -525,6 +525,9 @@ function renderTable(lines, startIndex) {
 	return { element: wrapper, nextIndex: index };
 }
 
+// Minimal inline renderer for common Pi output. Known limitations: it does not
+// handle escaped delimiters, nested formatting, or full Markdown inline grammar;
+// unmatched/unsupported constructs fall back to plain text around matched tokens.
 function renderInline(element, text) {
 	const pattern = /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
 	let lastIndex = 0;

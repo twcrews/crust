@@ -5,9 +5,10 @@ import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
-import type { Model, RpcEvent, SlashCommand } from '../pi/rpcTypes';
+import { isToolResult, type MessageUpdateEvent, type Model, type RpcEvent, type SlashCommand, type ToolExecutionEndEvent, type ToolExecutionStartEvent, type ToolExecutionUpdateEvent } from '../pi/rpcTypes';
 import { getCrustOutputChannel, logCrust, type CrustLogLevel } from '../utils/crustLogger';
-import type { SessionInfo, WebviewMessage } from './chatTypes';
+import { errorMessage } from '../utils/errorMessage';
+import { parseWebviewMessage, type SessionInfo } from './chatTypes';
 import { getChatWebviewHtml } from './chatWebview';
 import { buildPromptWithIdeContext, extractRestoredPrompt, getIdeContext } from './ideContext';
 import { getBlockText, getBlockType, getEntryTimestamp, getMessageContent, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from './messageUtils';
@@ -17,6 +18,36 @@ import { getToolBody, getToolHeaderDetail, getToolResultText, isRenderableTool }
 import { formatUsageStatus } from './usageStatus';
 
 const execFileAsync = promisify(execFile);
+
+type ConversationState = {
+	isProcessing: boolean;
+	isStreaming: boolean;
+	activeThinkingMessageId: string | undefined;
+	activeLoadingMessageId: string | undefined;
+	hasSessionTitle: boolean;
+	activeToolCallIds: Map<string, string>;
+	activeToolCallArgs: Map<string, unknown>;
+	activeTextMessageIds: Map<number, string>;
+	activeAbortIndicatorShown: boolean;
+	usageMessages: unknown[];
+	activeUsageMessage: unknown;
+};
+
+function createConversationState(): ConversationState {
+	return {
+		isProcessing: false,
+		isStreaming: false,
+		activeThinkingMessageId: undefined,
+		activeLoadingMessageId: undefined,
+		hasSessionTitle: false,
+		activeToolCallIds: new Map<string, string>(),
+		activeToolCallArgs: new Map<string, unknown>(),
+		activeTextMessageIds: new Map<number, string>(),
+		activeAbortIndicatorShown: false,
+		usageMessages: [],
+		activeUsageMessage: undefined,
+	};
+}
 
 export class CrustChatPanel implements vscode.Disposable {
 	private static readonly viewType = 'crustChat';
@@ -28,17 +59,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	private currentModel: Model | undefined;
 	private contextWindow: number | undefined;
 	private readonly notifiedErrors = new Set<string>();
-	private isProcessing = false;
-	private isStreaming = false;
-	private activeThinkingMessageId: string | undefined;
-	private activeLoadingMessageId: string | undefined;
-	private hasSessionTitle = false;
-	private activeToolCallIds = new Map<string, string>();
-	private activeToolCallArgs = new Map<string, unknown>();
-	private activeTextMessageIds = new Map<number, string>();
-	private activeAbortIndicatorShown = false;
-	private usageMessages: unknown[] = [];
-	private activeUsageMessage: unknown;
+	private conversationState = createConversationState();
 	private lastActiveTextEditor = vscode.window.activeTextEditor;
 	private piSlashCommands: SlashCommand[] = [];
 	private builtinSlashCommands: SlashCommand[] = [];
@@ -88,7 +109,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 		this.disposables.push(
 			this.panel.onDidDispose(() => this.dispose()),
-			this.panel.webview.onDidReceiveMessage((message: WebviewMessage) => this.handleWebviewMessage(message)),
+			this.panel.webview.onDidReceiveMessage((message: unknown) => this.handleWebviewMessage(message)),
 			vscode.window.onDidChangeActiveTextEditor((editor) => {
 				if (editor) {
 					this.lastActiveTextEditor = editor;
@@ -157,7 +178,7 @@ export class CrustChatPanel implements vscode.Disposable {
 						state = await this.client.getState();
 					}
 				} catch (error) {
-					this.log('Failed to switch to restored webview session', { error: error instanceof Error ? error.message : String(error), path: this.restoredSessionPath }, 'warn');
+					this.log('Failed to switch to restored webview session', { error: errorMessage(error), path: this.restoredSessionPath }, 'warn');
 				}
 			}
 			const messages = await this.client.getMessages();
@@ -180,7 +201,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			}
 			this.log('Initialized chat panel', { modelCount: models.length, messageCount: messages.length, commandCount: commands.length, contextWindow: this.contextWindow });
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message = errorMessage(error);
 			this.log('Failed to initialize chat panel', { error: message }, 'error');
 			this.postError(`Unable to start Pi RPC: ${message}`);
 			if (this.isPiNotInstalledError(message)) {
@@ -189,7 +210,12 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 
-	private async handleWebviewMessage(message: WebviewMessage): Promise<void> {
+	private async handleWebviewMessage(rawMessage: unknown): Promise<void> {
+		const message = parseWebviewMessage(rawMessage);
+		if (!message) {
+			this.log('Ignoring invalid webview message', undefined, 'warn');
+			return;
+		}
 		this.log('Received webview message', { type: message.type });
 		switch (message.type) {
 			case 'submit':
@@ -291,7 +317,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private async newChat(): Promise<void> {
-		if (this.isStreaming) {
+		if (this.conversationState.isStreaming) {
 			void vscode.window.showInformationMessage('Wait for the current response to finish before starting a new chat.');
 			return;
 		}
@@ -310,7 +336,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.postIdeContext();
 			void this.refreshSlashCommands();
 		} catch (error) {
-			this.postError(error instanceof Error ? error.message : String(error), { operation: 'newChat' });
+			this.postError(errorMessage(error), { operation: 'newChat' });
 		}
 	}
 
@@ -339,7 +365,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.log('Selected session from history', { path: selected.session.path });
 			await this.restoreSession(selected.session);
 		} catch (error) {
-			this.postError(error instanceof Error ? error.message : String(error), { operation: 'showHistory' });
+			this.postError(errorMessage(error), { operation: 'showHistory' });
 		}
 	}
 
@@ -369,21 +395,17 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		const title = sessionName ? extractRestoredPrompt(sessionName).text : firstUserMessage || 'New Chat';
-		this.hasSessionTitle = Boolean(firstUserMessage || sessionName);
+		this.conversationState.hasSessionTitle = Boolean(firstUserMessage || sessionName);
 		this.post({ type: 'sessionTitle', title: this.truncate(title, 50) });
 		await this.postSessionStatus(messages);
 	}
 
 	private resetConversationState(): void {
-		this.activeThinkingMessageId = undefined;
-		this.activeLoadingMessageId = undefined;
-		this.activeToolCallIds.clear();
-		this.activeToolCallArgs.clear();
-		this.activeTextMessageIds.clear();
-		this.activeAbortIndicatorShown = false;
-		this.hasSessionTitle = false;
-		this.setProcessing(false);
-		this.isStreaming = false;
+		const wasProcessing = this.conversationState.isProcessing;
+		this.conversationState = createConversationState();
+		if (wasProcessing) {
+			this.post({ type: 'processing', processing: false });
+		}
 	}
 
 	private restoreMessage(
@@ -501,16 +523,16 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 
-		const details = typeof record.details === 'object' && record.details !== null ? record.details as { diff?: unknown } : undefined;
-		const diff = typeof details?.diff === 'string' ? details.diff : undefined;
+		const result = isToolResult(message) ? message : undefined;
+		const diff = typeof result?.details?.diff === 'string' ? result.details.diff : undefined;
 		const isError = record.isError === true;
 		this.post({
 			type: 'upsertTool',
 			id: toolCall?.elementId ?? this.createId('restored-tool'),
 			toolName: name,
-			path: getToolHeaderDetail(name, toolCall?.args, isError ? undefined : message as RpcEvent['result']),
+			path: getToolHeaderDetail(name, toolCall?.args, isError ? undefined : result),
 			status: isError ? 'error' : 'done',
-			body: name === 'read' && !isError ? undefined : diff ?? getToolResultText(message as RpcEvent['result']) ?? getToolBody(name, toolCall?.args),
+			body: name === 'read' && !isError ? undefined : diff ?? getToolResultText(result) ?? getToolBody(name, toolCall?.args),
 			isDiff: Boolean(diff),
 		});
 	}
@@ -523,9 +545,19 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 
+	private finalizeUsageStatus(message: unknown): void {
+		if (!this.hasMessageUsage(message)) {
+			void this.refreshUsageStatus();
+			return;
+		}
+		this.conversationState.usageMessages = [...this.conversationState.usageMessages, message];
+		this.conversationState.activeUsageMessage = undefined;
+		this.postCurrentUsageStatus();
+	}
+
 	private async postSessionStatus(messages: unknown[]): Promise<void> {
-		this.usageMessages = messages;
-		this.activeUsageMessage = undefined;
+		this.conversationState.usageMessages = messages;
+		this.conversationState.activeUsageMessage = undefined;
 		if (!messages.length) {
 			this.post({ type: 'status', message: await this.getWorkspaceStatus() });
 			return;
@@ -538,7 +570,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.piSlashCommands = await this.client.getCommands();
 			this.postSlashCommands();
 		} catch (error) {
-			this.log('Failed to refresh slash commands', { error: error instanceof Error ? error.message : String(error) }, 'warn');
+			this.log('Failed to refresh slash commands', { error: errorMessage(error) }, 'warn');
 		}
 	}
 
@@ -578,7 +610,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			}
 			return commands.length ? commands : [{ name: 'new', description: 'Start a new session', source: 'builtin' }];
 		} catch (error) {
-			this.log('Failed to load Pi builtin slash commands', { error: error instanceof Error ? error.message : String(error) }, 'warn');
+			this.log('Failed to load Pi builtin slash commands', { error: errorMessage(error) }, 'warn');
 			return [{ name: 'new', description: 'Start a new session', source: 'builtin' }];
 		}
 	}
@@ -664,7 +696,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private postCurrentUsageStatus(): void {
-		const messages = this.activeUsageMessage === undefined ? this.usageMessages : [...this.usageMessages, this.activeUsageMessage];
+		const messages = this.conversationState.activeUsageMessage === undefined ? this.conversationState.usageMessages : [...this.conversationState.usageMessages, this.conversationState.activeUsageMessage];
 		this.post({ type: 'status', message: formatUsageStatus(messages, this.contextWindow) });
 	}
 
@@ -679,7 +711,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.post({ type: 'sessionPath', sessionPath });
 			this.watchSessionFile(sessionPath);
 		} catch (error) {
-			this.log('Failed to post current session path', { error: error instanceof Error ? error.message : String(error) }, 'warn');
+			this.log('Failed to post current session path', { error: errorMessage(error) }, 'warn');
 		}
 	}
 
@@ -692,7 +724,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.log('Current model changed', { previous: previousKey, current: nextKey });
 		}
 		this.postModels();
-		if (this.usageMessages.length) {
+		if (this.conversationState.usageMessages.length) {
 			this.postCurrentUsageStatus();
 		}
 	}
@@ -716,7 +748,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				this.setCurrentModel(model);
 			}
 		} catch (error) {
-			this.log('Failed to refresh current model from Pi state', { error: error instanceof Error ? error.message : String(error) }, 'warn');
+			this.log('Failed to refresh current model from Pi state', { error: errorMessage(error) }, 'warn');
 		}
 	}
 
@@ -733,7 +765,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.setCurrentModel(model);
 			return true;
 		} catch (error) {
-			this.log('Failed to refresh current model from session file', { error: error instanceof Error ? error.message : String(error), path: this.activeSessionPath }, 'warn');
+			this.log('Failed to refresh current model from session file', { error: errorMessage(error), path: this.activeSessionPath }, 'warn');
 			return false;
 		}
 	}
@@ -783,7 +815,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				}, 100);
 			});
 		} catch (error) {
-			this.log('Failed to watch session file for model changes', { error: error instanceof Error ? error.message : String(error), path: sessionPath }, 'warn');
+			this.log('Failed to watch session file for model changes', { error: errorMessage(error), path: sessionPath }, 'warn');
 		}
 	}
 
@@ -801,33 +833,33 @@ export class CrustChatPanel implements vscode.Disposable {
 		const displayText = display?.text ?? trimmed;
 		const ideContext = includeIdeContext ? getIdeContext(this.lastActiveTextEditor) : undefined;
 		const promptText = ideContext ? buildPromptWithIdeContext(trimmed, ideContext) : trimmed;
-		this.log('Submitting prompt', { length: trimmed.length, promptLength: promptText.length, followUp: this.isStreaming, ideContext: ideContext?.label, slashCommand: display?.slashCommandLabel });
+		this.log('Submitting prompt', { length: trimmed.length, promptLength: promptText.length, followUp: this.conversationState.isStreaming, ideContext: ideContext?.label, slashCommand: display?.slashCommandLabel });
 		if (!trimmed) {
 			return;
 		}
 
 		await this.refreshCurrentModel();
 
-		if (!this.hasSessionTitle) {
+		if (!this.conversationState.hasSessionTitle) {
 			this.setSessionTitleFromPrompt(display?.slashCommandLabel ?? displayText);
 		}
 
 		const userMessageId = this.createId('user');
-		this.activeLoadingMessageId = this.createId('loading');
-		this.activeTextMessageIds.clear();
-		this.activeAbortIndicatorShown = false;
+		this.conversationState.activeLoadingMessageId = this.createId('loading');
+		this.conversationState.activeTextMessageIds.clear();
+		this.conversationState.activeAbortIndicatorShown = false;
 		this.post({ type: 'addMessage', id: userMessageId, role: 'user', text: displayText, ideContextLabel: ideContext?.label, slashCommandLabel: display?.slashCommandLabel });
-		this.post({ type: 'addMessage', id: this.activeLoadingMessageId, role: 'assistant', text: '', loading: true });
+		this.post({ type: 'addMessage', id: this.conversationState.activeLoadingMessageId, role: 'assistant', text: '', loading: true });
 		this.setProcessing(true);
-		this.activeUsageMessage = undefined;
-		if (this.usageMessages.length) {
+		this.conversationState.activeUsageMessage = undefined;
+		if (this.conversationState.usageMessages.length) {
 			this.postCurrentUsageStatus();
 		}
 
 		try {
-			await this.client.prompt(promptText, this.isStreaming ? 'followUp' : undefined);
+			await this.client.prompt(promptText, this.conversationState.isStreaming ? 'followUp' : undefined);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message = errorMessage(error);
 			this.log('Prompt failed', { error: message }, 'error');
 			const assistantMessageId = this.getStreamingTextMessageId(0);
 			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\nError: ${message}` });
@@ -842,7 +874,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		if (!trimmed) {
 			return;
 		}
-		if (!this.isProcessing) {
+		if (!this.conversationState.isProcessing) {
 			await this.submitPrompt(trimmed, true);
 			return;
 		}
@@ -852,12 +884,12 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.post({ type: 'addMessage', id: this.createId('user'), role: 'user', text: trimmed });
 			await this.client.steer(trimmed);
 		} catch (error) {
-			this.postError(error instanceof Error ? error.message : String(error), { operation: 'steerPrompt' });
+			this.postError(errorMessage(error), { operation: 'steerPrompt' });
 		}
 	}
 
 	private async cancelPrompt(): Promise<void> {
-		if (!this.isProcessing) {
+		if (!this.conversationState.isProcessing) {
 			return;
 		}
 
@@ -868,14 +900,14 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.showAbortIndicator(lastAssistant);
 			this.post({ type: 'status', message: 'Stopped.' });
 		} catch (error) {
-			this.postError(error instanceof Error ? error.message : String(error), { operation: 'cancelPrompt' });
+			this.postError(errorMessage(error), { operation: 'cancelPrompt' });
 		} finally {
 			this.setProcessing(false);
-			this.isStreaming = false;
-			this.activeThinkingMessageId = undefined;
-			this.activeToolCallIds.clear();
-			this.activeToolCallArgs.clear();
-			this.activeTextMessageIds.clear();
+			this.conversationState.isStreaming = false;
+			this.conversationState.activeThinkingMessageId = undefined;
+			this.conversationState.activeToolCallIds.clear();
+			this.conversationState.activeToolCallArgs.clear();
+			this.conversationState.activeTextMessageIds.clear();
 			this.removeActiveLoadingMessage();
 		}
 	}
@@ -891,7 +923,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.setCurrentModel(model);
 			await this.postSessionStatus(await this.client.getMessages());
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message = errorMessage(error);
 			this.postError(message, { operation: 'selectModel' });
 			this.maybeShowModelConnectionToast(message);
 		}
@@ -905,12 +937,12 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 		if (event.type === 'agent_start') {
 			this.setProcessing(true);
-			this.isStreaming = true;
-			this.activeThinkingMessageId = undefined;
-			this.activeToolCallIds.clear();
-			this.activeToolCallArgs.clear();
-			this.activeTextMessageIds.clear();
-			this.activeAbortIndicatorShown = false;
+			this.conversationState.isStreaming = true;
+			this.conversationState.activeThinkingMessageId = undefined;
+			this.conversationState.activeToolCallIds.clear();
+			this.conversationState.activeToolCallArgs.clear();
+			this.conversationState.activeTextMessageIds.clear();
+			this.conversationState.activeAbortIndicatorShown = false;
 			return;
 		}
 
@@ -921,13 +953,13 @@ export class CrustChatPanel implements vscode.Disposable {
 				this.maybeShowModelConnectionToast(errorMessage);
 			}
 			this.setProcessing(false);
-			this.isStreaming = false;
-			this.activeThinkingMessageId = undefined;
-			this.activeToolCallIds.clear();
-			this.activeToolCallArgs.clear();
-			this.activeTextMessageIds.clear();
+			this.conversationState.isStreaming = false;
+			this.conversationState.activeThinkingMessageId = undefined;
+			this.conversationState.activeToolCallIds.clear();
+			this.conversationState.activeToolCallArgs.clear();
+			this.conversationState.activeTextMessageIds.clear();
 			this.removeActiveLoadingMessage();
-			void this.refreshUsageStatus();
+			this.finalizeUsageStatus(event.message);
 			void this.postCurrentSessionPath();
 			void this.refreshCurrentModel();
 			return;
@@ -970,10 +1002,10 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private showAbortIndicator(message: unknown): void {
-		if (this.activeAbortIndicatorShown || !this.isAbortedAssistantMessage(message)) {
+		if (this.conversationState.activeAbortIndicatorShown || !this.isAbortedAssistantMessage(message)) {
 			return;
 		}
-		this.activeAbortIndicatorShown = true;
+		this.conversationState.activeAbortIndicatorShown = true;
 		this.post({ type: 'addMessage', id: this.createId('assistant'), role: 'assistant', text: `_${this.getAbortMessage(message)}_`, secondary: true });
 	}
 
@@ -1062,31 +1094,31 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private getStreamingTextMessageId(contentIndex: number): string {
-		const existing = this.activeTextMessageIds.get(contentIndex);
+		const existing = this.conversationState.activeTextMessageIds.get(contentIndex);
 		if (existing) {
 			return existing;
 		}
 
 		const id = this.createId('assistant');
-		this.activeTextMessageIds.set(contentIndex, id);
+		this.conversationState.activeTextMessageIds.set(contentIndex, id);
 		this.post({ type: 'addMessage', id, role: 'assistant', text: '' });
 		return id;
 	}
 
 	private removeActiveLoadingMessage(): void {
-		if (!this.activeLoadingMessageId) {
+		if (!this.conversationState.activeLoadingMessageId) {
 			return;
 		}
-		this.post({ type: 'removeMessage', id: this.activeLoadingMessageId });
-		this.activeLoadingMessageId = undefined;
+		this.post({ type: 'removeMessage', id: this.conversationState.activeLoadingMessageId });
+		this.conversationState.activeLoadingMessageId = undefined;
 	}
 
-	private showToolExecutionStart(event: RpcEvent): void {
+	private showToolExecutionStart(event: ToolExecutionStartEvent): void {
 		if (!isRenderableTool(event.toolName)) {
 			return;
 		}
 
-		const args = event.args ?? (event.toolCallId ? this.activeToolCallArgs.get(event.toolCallId) : undefined);
+		const args = event.args ?? (event.toolCallId ? this.conversationState.activeToolCallArgs.get(event.toolCallId) : undefined);
 		const id = this.toolElementId(event.toolCallId);
 		this.post({
 			type: 'upsertTool',
@@ -1098,12 +1130,12 @@ export class CrustChatPanel implements vscode.Disposable {
 		});
 	}
 
-	private showToolExecutionUpdate(event: RpcEvent): void {
+	private showToolExecutionUpdate(event: ToolExecutionUpdateEvent): void {
 		if (!isRenderableTool(event.toolName) || event.toolName === 'read') {
 			return;
 		}
 
-		const args = event.args ?? (event.toolCallId ? this.activeToolCallArgs.get(event.toolCallId) : undefined);
+		const args = event.args ?? (event.toolCallId ? this.conversationState.activeToolCallArgs.get(event.toolCallId) : undefined);
 		this.post({
 			type: 'upsertTool',
 			id: this.toolElementId(event.toolCallId),
@@ -1114,12 +1146,12 @@ export class CrustChatPanel implements vscode.Disposable {
 		});
 	}
 
-	private showToolExecutionEnd(event: RpcEvent): void {
+	private showToolExecutionEnd(event: ToolExecutionEndEvent): void {
 		if (!isRenderableTool(event.toolName)) {
 			return;
 		}
 
-		const args = event.args ?? (event.toolCallId ? this.activeToolCallArgs.get(event.toolCallId) : undefined);
+		const args = event.args ?? (event.toolCallId ? this.conversationState.activeToolCallArgs.get(event.toolCallId) : undefined);
 		const diff = typeof event.result?.details?.diff === 'string' ? event.result.details.diff : undefined;
 		this.post({
 			type: 'upsertTool',
@@ -1132,11 +1164,11 @@ export class CrustChatPanel implements vscode.Disposable {
 		});
 	}
 
-	private showStreamingUsage(event: RpcEvent): void {
+	private showStreamingUsage(event: MessageUpdateEvent): void {
 		if (event.message === undefined || !this.hasMessageUsage(event.message)) {
 			return;
 		}
-		this.activeUsageMessage = event.message;
+		this.conversationState.activeUsageMessage = event.message;
 		this.postCurrentUsageStatus();
 	}
 
@@ -1149,23 +1181,23 @@ export class CrustChatPanel implements vscode.Disposable {
 		return typeof usage === 'object' && usage !== null;
 	}
 
-	private showStreamingThinking(event: RpcEvent): void {
+	private showStreamingThinking(event: MessageUpdateEvent): void {
 		const assistantEvent = event.assistantMessageEvent;
 		if (assistantEvent?.type === 'thinking_start') {
-			this.activeThinkingMessageId = undefined;
+			this.conversationState.activeThinkingMessageId = undefined;
 			return;
 		}
 
 		if (assistantEvent?.type === 'thinking_delta' && assistantEvent.delta) {
-			if (!this.activeThinkingMessageId) {
-				this.activeThinkingMessageId = this.createId('thinking');
-				this.post({ type: 'addThinking', id: this.activeThinkingMessageId });
+			if (!this.conversationState.activeThinkingMessageId) {
+				this.conversationState.activeThinkingMessageId = this.createId('thinking');
+				this.post({ type: 'addThinking', id: this.conversationState.activeThinkingMessageId });
 			}
-			this.post({ type: 'appendThinking', id: this.activeThinkingMessageId, text: assistantEvent.delta });
+			this.post({ type: 'appendThinking', id: this.conversationState.activeThinkingMessageId, text: assistantEvent.delta });
 		}
 	}
 
-	private showStreamingToolCall(event: RpcEvent): void {
+	private showStreamingToolCall(event: MessageUpdateEvent): void {
 		const assistantEvent = event.assistantMessageEvent;
 		if (!assistantEvent?.type.startsWith('toolcall_')) {
 			return;
@@ -1177,21 +1209,21 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		if (toolCall.id && toolCall.args !== undefined) {
-			this.activeToolCallArgs.set(toolCall.id, toolCall.args);
+			this.conversationState.activeToolCallArgs.set(toolCall.id, toolCall.args);
 		}
 		const contentIndex = assistantEvent.contentIndex ?? 0;
 		const indexKey = `index:${contentIndex}`;
 		const toolKey = toolCall.id ? `id:${toolCall.id}` : indexKey;
-		const existingId = this.activeToolCallIds.get(toolKey) ?? this.activeToolCallIds.get(indexKey);
+		const existingId = this.conversationState.activeToolCallIds.get(toolKey) ?? this.conversationState.activeToolCallIds.get(indexKey);
 		const id = toolCall.id ? this.toolElementId(toolCall.id) : existingId ?? this.createId('toolcall');
 		if (toolCall.id) {
-			const temporaryId = this.activeToolCallIds.get(indexKey);
+			const temporaryId = this.conversationState.activeToolCallIds.get(indexKey);
 			if (temporaryId && temporaryId !== id) {
 				this.post({ type: 'removeMessage', id: temporaryId });
 			}
-			this.activeToolCallIds.delete(indexKey);
+			this.conversationState.activeToolCallIds.delete(indexKey);
 		}
-		this.activeToolCallIds.set(toolKey, id);
+		this.conversationState.activeToolCallIds.set(toolKey, id);
 		this.post({
 			type: 'upsertTool',
 			id,
@@ -1203,7 +1235,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		});
 	}
 
-	private extractToolCall(event: RpcEvent): { id?: string; name?: string; args?: unknown } {
+	private extractToolCall(event: MessageUpdateEvent): { id?: string; name?: string; args?: unknown } {
 		const assistantEvent = event.assistantMessageEvent;
 		const candidates = [
 			assistantEvent?.toolCall,
@@ -1244,10 +1276,10 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private setProcessing(isProcessing: boolean): void {
-		if (this.isProcessing === isProcessing) {
+		if (this.conversationState.isProcessing === isProcessing) {
 			return;
 		}
-		this.isProcessing = isProcessing;
+		this.conversationState.isProcessing = isProcessing;
 		this.post({ type: 'processing', processing: isProcessing });
 	}
 
@@ -1280,7 +1312,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private setSessionTitleFromPrompt(prompt: string): void {
-		this.hasSessionTitle = true;
+		this.conversationState.hasSessionTitle = true;
 		const title = prompt.length > 50 ? `${prompt.slice(0, 47)}...` : prompt;
 		this.post({ type: 'sessionTitle', title });
 	}

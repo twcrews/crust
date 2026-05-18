@@ -221,67 +221,118 @@ updateEmptyState();
 updateConversationNavButtons();
 focusPromptSoon();
 
+function parseExtensionMessage(value) {
+	if (!value || typeof value !== "object" || typeof value.type !== "string") {
+		return null;
+	}
+	const arrayValue = (candidate) => Array.isArray(candidate) ? candidate : [];
+	const stringValue = (candidate, fallback = "") => typeof candidate === "string" ? candidate : fallback;
+	const idMessage = () => typeof value.id === "string" ? value : null;
+
+	switch (value.type) {
+		case "models":
+			return { type: "models", models: arrayValue(value.models), selected: stringValue(value.selected, undefined) };
+		case "slashCommands":
+			return { type: "slashCommands", commands: arrayValue(value.commands) };
+		case "focusModel":
+		case "focusPrompt":
+		case "clearMessages":
+			return { type: value.type };
+		case "pathAutocomplete":
+			return typeof value.requestId === "number" ? { type: "pathAutocomplete", requestId: value.requestId, suggestions: arrayValue(value.suggestions) } : null;
+		case "status":
+		case "error":
+			return { type: value.type, message: stringValue(value.message) };
+		case "processing":
+			return { type: "processing", processing: value.processing === true };
+		case "sessionTitle":
+			return { type: "sessionTitle", title: stringValue(value.title, "New Chat") };
+		case "sessionPath":
+			return { type: "sessionPath", sessionPath: stringValue(value.sessionPath, undefined) };
+		case "ideContext":
+			return { type: "ideContext", label: stringValue(value.label) };
+		case "addMessage":
+			return typeof value.id === "string" && (value.role === "user" || value.role === "assistant") ? value : null;
+		case "appendMessage":
+		case "appendThinking":
+			return typeof value.id === "string" ? { type: value.type, id: value.id, text: stringValue(value.text) } : null;
+		case "removeMessage":
+		case "addThinking":
+			return idMessage();
+		case "upsertTool":
+			return typeof value.id === "string" && typeof value.toolName === "string" ? value : null;
+		default:
+			return null;
+	}
+}
+
 window.addEventListener("message", (event) => {
-	const message = event.data;
+	const message = parseExtensionMessage(event.data);
+	if (!message) {
+		logWebview("Ignored invalid extension message", getMessageLogDetails(event.data), "warn");
+		return;
+	}
 	logWebview("Received extension message", getMessageLogDetails(message));
-	if (message.type === "models") {
-		setModels(message.models ?? [], message.selected);
-	}
-	if (message.type === "slashCommands") {
-		setSlashCommands(message.commands ?? []);
-	}
-	if (message.type === "focusModel") {
-		model.focus();
-	}
-	if (message.type === "focusPrompt") {
-		focusPromptSoon();
-	}
-	if (message.type === "pathAutocomplete") {
-		setPathSuggestions(message.requestId, message.suggestions ?? []);
-	}
-	if (message.type === "status") {
-		setStatus(message.message ?? "", false);
-	}
-	if (message.type === "processing") {
-		setProcessing(message.processing === true);
-	}
-	if (message.type === "sessionTitle") {
-		setSessionTitle(message.title ?? "New Chat");
-	}
-	if (message.type === "sessionPath") {
-		updatePersistedWebviewState({ sessionPath: message.sessionPath || undefined });
-	}
-	if (message.type === "error") {
-		setStatus(message.message ?? "", true);
-	}
-	if (message.type === "ideContext") {
-		setIdeContext(message.label ?? "");
-	}
-	if (message.type === "clearMessages") {
-		messagesContent.textContent = "";
-		currentTurn = null;
-		setRandomEmptyStateFlavorText();
-		updateEmptyState();
-	}
-	if (message.type === "addMessage") {
-		if (message.role === "user") {
-			recordPromptHistory(message.text ?? "");
-		}
-		addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "", message.slashCommandLabel ?? "", message.secondary === true);
-	}
-	if (message.type === "appendMessage") {
-		appendMessage(message.id, message.text ?? "");
-	}
-	if (message.type === "removeMessage") {
-		removeMessage(message.id);
-	}
-	if (message.type === "upsertTool") {
-		upsertTool(message);
-	}
-	if (message.type === "addThinking") {
-		addThinking(message.id);
-	}
-	if (message.type === "appendThinking") {
-		appendThinking(message.id, message.text ?? "");
+	switch (message.type) {
+		case "models":
+			setModels(message.models, message.selected);
+			break;
+		case "slashCommands":
+			setSlashCommands(message.commands);
+			break;
+		case "focusModel":
+			model.focus();
+			break;
+		case "focusPrompt":
+			focusPromptSoon();
+			break;
+		case "pathAutocomplete":
+			setPathSuggestions(message.requestId, message.suggestions);
+			break;
+		case "status":
+			setStatus(message.message, false);
+			break;
+		case "processing":
+			setProcessing(message.processing);
+			break;
+		case "sessionTitle":
+			setSessionTitle(message.title);
+			break;
+		case "sessionPath":
+			updatePersistedWebviewState({ sessionPath: message.sessionPath || undefined });
+			break;
+		case "error":
+			setStatus(message.message, true);
+			break;
+		case "ideContext":
+			setIdeContext(message.label);
+			break;
+		case "clearMessages":
+			messagesContent.textContent = "";
+			currentTurn = null;
+			setRandomEmptyStateFlavorText();
+			updateEmptyState();
+			break;
+		case "addMessage":
+			if (message.role === "user") {
+				recordPromptHistory(message.text ?? "");
+			}
+			addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "", message.slashCommandLabel ?? "", message.secondary === true);
+			break;
+		case "appendMessage":
+			appendMessage(message.id, message.text);
+			break;
+		case "removeMessage":
+			removeMessage(message.id);
+			break;
+		case "upsertTool":
+			upsertTool(message);
+			break;
+		case "addThinking":
+			addThinking(message.id);
+			break;
+		case "appendThinking":
+			appendThinking(message.id, message.text);
+			break;
 	}
 });

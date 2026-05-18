@@ -23,8 +23,12 @@ suite('RPC type guards', () => {
 		assert.strictEqual(isRpcResponse(null), false);
 	});
 
-	test('identifies RPC events by string type', () => {
-		assert.strictEqual(isRpcEvent({ type: 'assistant_message', assistantMessageEvent: { type: 'delta' } }), true);
+	test('validates known RPC event shapes', () => {
+		assert.strictEqual(isRpcEvent({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello' } }), true);
+		assert.strictEqual(isRpcEvent({ type: 'model_select', model: { id: 'gpt-5', provider: 'openai' } }), true);
+		assert.strictEqual(isRpcEvent({ type: 'assistant_message', assistantMessageEvent: { type: 'delta' } }), false);
+		assert.strictEqual(isRpcEvent({ type: 'model_select', model: { id: 'missing provider' } }), false);
+		assert.strictEqual(isRpcEvent({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 42 } }), false);
 		assert.strictEqual(isRpcEvent({ type: 42 }), false);
 		assert.strictEqual(isRpcEvent(undefined), false);
 	});
@@ -404,7 +408,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(panelSource, /registerWebviewPanelSerializer\(CrustChatPanel\.viewType/);
 		assert.match(panelSource, /deserializeWebviewPanel: async \(panel, state(?:: unknown)?\) => \{[\s\S]*new CrustChatPanel\(context, panel, sessionPath\);/);
 		assert.match(panelSource, /switchSession\(this\.restoredSessionPath\)/);
-		assert.match(panelSource, /this\.post\(\{ type: 'sessionPath', sessionPath: this\.getSessionPath\(state\) \}\);/);
+		assert.match(panelSource, /const sessionPath = this\.getSessionPath\(state\);[\s\S]*this\.post\(\{ type: 'sessionPath', sessionPath \}\);/);
 		assert.match(mainSource, /if \(message\.type === "sessionPath"\) \{[\s\S]*updatePersistedWebviewState\(\{ sessionPath: message\.sessionPath \|\| undefined \}\);[\s\S]*\}/);
 		assert.match(stateSource, /let persistedWebviewState = vscode\.getState\(\) \|\| \{\};/);
 		assert.match(stateSource, /vscode\.setState\(persistedWebviewState\);/);

@@ -1,4 +1,4 @@
-import type { RpcEvent } from '../pi/rpcTypes';
+import type { ToolResult } from '../pi/rpcTypes';
 
 export function isFileTool(toolName: string | undefined): boolean {
 	return toolName === 'read' || toolName === 'write' || toolName === 'edit';
@@ -8,15 +8,19 @@ export function isRenderableTool(toolName: string | undefined): boolean {
 	return isFileTool(toolName) || toolName === 'bash';
 }
 
+function isRecord(args: unknown): args is Record<string, unknown> {
+	return typeof args === 'object' && args !== null;
+}
+
 export function getToolPath(args: unknown): string | undefined {
-	if (typeof args !== 'object' || args === null) {
+	if (!isRecord(args)) {
 		return undefined;
 	}
-	const path = (args as { path?: unknown; file_path?: unknown }).path ?? (args as { file_path?: unknown }).file_path;
+	const path = args.path ?? args.file_path;
 	return typeof path === 'string' ? path : undefined;
 }
 
-export function getToolHeaderDetail(toolName: string | undefined, args: unknown, result?: RpcEvent['result']): string | undefined {
+export function getToolHeaderDetail(toolName: string | undefined, args: unknown, result?: ToolResult): string | undefined {
 	if (toolName === 'bash') {
 		return getBashCommand(args);
 	}
@@ -35,12 +39,12 @@ export function getToolHeaderDetail(toolName: string | undefined, args: unknown,
 }
 
 export function getToolBody(toolName: string | undefined, args: unknown): string | undefined {
-	if (typeof args !== 'object' || args === null || toolName === 'read') {
+	if (!isRecord(args) || toolName === 'read') {
 		return undefined;
 	}
 
 	if (toolName === 'write') {
-		const content = (args as { content?: unknown }).content;
+		const content = args.content;
 		return typeof content === 'string' ? content : undefined;
 	}
 
@@ -57,21 +61,20 @@ export function getToolBody(toolName: string | undefined, args: unknown): string
 }
 
 function getBashCommand(args: unknown): string | undefined {
-	if (typeof args !== 'object' || args === null) {
+	if (!isRecord(args)) {
 		return undefined;
 	}
-	const command = (args as { command?: unknown; cmd?: unknown }).command ?? (args as { cmd?: unknown }).cmd;
+	const command = args.command ?? args.cmd;
 	return typeof command === 'string' ? command : undefined;
 }
 
-function isEntireFileRead(args: unknown, result: RpcEvent['result'] | undefined): boolean {
-	if (typeof args !== 'object' || args === null) {
+function isEntireFileRead(args: unknown, result: ToolResult | undefined): boolean {
+	if (!isRecord(args)) {
 		return true;
 	}
 
-	const record = args as { offset?: unknown; limit?: unknown };
-	const startLine = getPositiveInteger(record.offset) ?? 1;
-	if (record.limit === undefined) {
+	const startLine = getPositiveInteger(args.offset) ?? 1;
+	if (args.limit === undefined) {
 		return startLine === 1;
 	}
 
@@ -89,17 +92,16 @@ function isEntireFileRead(args: unknown, result: RpcEvent['result'] | undefined)
 }
 
 function getReadLineRange(args: unknown): string | undefined {
-	if (typeof args !== 'object' || args === null) {
+	if (!isRecord(args)) {
 		return undefined;
 	}
 
-	const record = args as { offset?: unknown; limit?: unknown };
-	if (record.offset === undefined && record.limit === undefined) {
+	if (args.offset === undefined && args.limit === undefined) {
 		return undefined;
 	}
 
-	const startLine = getPositiveInteger(record.offset) ?? 1;
-	const limit = getPositiveInteger(record.limit);
+	const startLine = getPositiveInteger(args.offset) ?? 1;
+	const limit = getPositiveInteger(args.limit);
 	if (limit === undefined) {
 		return `line ${startLine}`;
 	}
@@ -112,8 +114,8 @@ function getPositiveInteger(value: unknown): number | undefined {
 	return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
-function getEditPreview(args: unknown): string | undefined {
-	const edits = (args as { edits?: unknown }).edits;
+function getEditPreview(args: Record<string, unknown>): string | undefined {
+	const edits = args.edits;
 	if (!Array.isArray(edits)) {
 		return undefined;
 	}
@@ -126,7 +128,7 @@ function getEditPreview(args: unknown): string | undefined {
 		.join('\n');
 }
 
-export function getToolResultText(result: RpcEvent['result']): string | undefined {
+export function getToolResultText(result: ToolResult | undefined): string | undefined {
 	const text = result?.content
 		?.filter((content) => content.type === 'text')
 		.map((content) => content.text ?? '')

@@ -7,25 +7,78 @@ export type RpcResponse = {
 	error?: string;
 };
 
-export type RpcEvent = {
-	type: string;
-	message?: unknown;
-	model?: Model;
+export type RpcEvent = ModelSelectEvent
+	| AgentStartEvent
+	| AgentEndEvent
+	| ToolExecutionStartEvent
+	| ToolExecutionUpdateEvent
+	| ToolExecutionEndEvent
+	| MessageUpdateEvent;
+
+export type ModelSelectEvent = {
+	type: 'model_select';
+	model: Model;
 	previousModel?: Model;
+};
+
+export type AgentStartEvent = {
+	type: 'agent_start';
+};
+
+export type AgentEndEvent = {
+	type: 'agent_end';
+	message?: RpcMessage;
+};
+
+export type ToolExecutionStartEvent = {
+	type: 'tool_execution_start';
+	toolCallId?: string;
+	toolName?: string;
+	args?: unknown;
+};
+
+export type ToolExecutionUpdateEvent = {
+	type: 'tool_execution_update';
 	toolCallId?: string;
 	toolName?: string;
 	args?: unknown;
 	partialResult?: ToolResult;
+};
+
+export type ToolExecutionEndEvent = {
+	type: 'tool_execution_end';
+	toolCallId?: string;
+	toolName?: string;
+	args?: unknown;
 	result?: ToolResult;
 	isError?: boolean;
-	assistantMessageEvent?: {
-		type: string;
-		contentIndex?: number;
-		delta?: string;
-		reason?: string;
-		partial?: unknown;
-		toolCall?: unknown;
-	};
+};
+
+export type MessageUpdateEvent = {
+	type: 'message_update';
+	message?: RpcMessage;
+	toolCallId?: string;
+	assistantMessageEvent?: AssistantMessageEvent;
+};
+
+export type RpcMessage = Record<string, unknown> & {
+	content?: unknown;
+	error?: unknown;
+	errorMessage?: unknown;
+	message?: unknown;
+	reason?: unknown;
+	role?: unknown;
+	stopReason?: unknown;
+	usage?: unknown;
+};
+
+export type AssistantMessageEvent = {
+	type: string;
+	contentIndex?: number;
+	delta?: string;
+	reason?: string;
+	partial?: unknown;
+	toolCall?: unknown;
 };
 
 export type ToolResult = {
@@ -56,6 +109,10 @@ export type SlashCommand = {
 	sourceInfo?: SlashCommandSourceInfo;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
 export function normalizeSlashCommand(value: unknown): SlashCommand | undefined {
 	if (!isSlashCommand(value)) {
 		return undefined;
@@ -69,36 +126,100 @@ export function normalizeSlashCommand(value: unknown): SlashCommand | undefined 
 }
 
 export function isSlashCommand(value: unknown): value is SlashCommand {
-	return typeof value === 'object'
-		&& value !== null
-		&& typeof (value as { name?: unknown }).name === 'string'
-		&& ((value as { description?: unknown }).description === undefined || typeof (value as { description?: unknown }).description === 'string')
-		&& ((value as { source?: unknown }).source === undefined || typeof (value as { source?: unknown }).source === 'string')
-		&& ((value as { location?: unknown }).location === undefined || typeof (value as { location?: unknown }).location === 'string')
-		&& ((value as { path?: unknown }).path === undefined || typeof (value as { path?: unknown }).path === 'string')
-		&& ((value as { sourceInfo?: unknown }).sourceInfo === undefined || isSlashCommandSourceInfo((value as { sourceInfo?: unknown }).sourceInfo));
+	return isRecord(value)
+		&& typeof value.name === 'string'
+		&& (value.description === undefined || typeof value.description === 'string')
+		&& (value.source === undefined || typeof value.source === 'string')
+		&& (value.location === undefined || typeof value.location === 'string')
+		&& (value.path === undefined || typeof value.path === 'string')
+		&& (value.sourceInfo === undefined || isSlashCommandSourceInfo(value.sourceInfo));
 }
 
 export function isSlashCommandSourceInfo(value: unknown): value is SlashCommandSourceInfo {
-	return typeof value === 'object'
-		&& value !== null
-		&& typeof (value as { path?: unknown }).path === 'string'
-		&& typeof (value as { source?: unknown }).source === 'string'
-		&& typeof (value as { scope?: unknown }).scope === 'string'
-		&& typeof (value as { origin?: unknown }).origin === 'string'
-		&& ((value as { baseDir?: unknown }).baseDir === undefined || typeof (value as { baseDir?: unknown }).baseDir === 'string');
+	return isRecord(value)
+		&& typeof value.path === 'string'
+		&& typeof value.source === 'string'
+		&& typeof value.scope === 'string'
+		&& typeof value.origin === 'string'
+		&& (value.baseDir === undefined || typeof value.baseDir === 'string');
 }
 
 export function isRpcResponse(message: unknown): message is RpcResponse {
-	return typeof message === 'object'
-		&& message !== null
-		&& (message as { type?: unknown }).type === 'response'
-		&& typeof (message as { command?: unknown }).command === 'string'
-		&& typeof (message as { success?: unknown }).success === 'boolean';
+	return isRecord(message)
+		&& message.type === 'response'
+		&& typeof message.command === 'string'
+		&& typeof message.success === 'boolean';
 }
 
 export function isRpcEvent(message: unknown): message is RpcEvent {
-	return typeof message === 'object'
-		&& message !== null
-		&& typeof (message as { type?: unknown }).type === 'string';
+	if (!isRecord(message) || typeof message.type !== 'string') {
+		return false;
+	}
+
+	const baseEventFieldsValid = hasOptionalString(message, 'toolCallId')
+		&& hasOptionalString(message, 'toolName')
+		&& hasOptionalBoolean(message, 'isError');
+	if (!baseEventFieldsValid) {
+		return false;
+	}
+
+	switch (message.type) {
+		case 'model_select':
+			return isModel(message.model)
+				&& (message.previousModel === undefined || isModel(message.previousModel));
+		case 'agent_start':
+			return true;
+		case 'agent_end':
+			return message.message === undefined || isRecord(message.message);
+		case 'tool_execution_start':
+			return true;
+		case 'tool_execution_update':
+			return message.partialResult === undefined || isToolResult(message.partialResult);
+		case 'tool_execution_end':
+			return message.result === undefined || isToolResult(message.result);
+		case 'message_update':
+			return (message.message === undefined || isRecord(message.message))
+				&& (message.assistantMessageEvent === undefined || isAssistantMessageEvent(message.assistantMessageEvent));
+		default:
+			return false;
+	}
+}
+
+function isModel(value: unknown): value is Model {
+	return isRecord(value)
+		&& typeof value.id === 'string'
+		&& typeof value.provider === 'string'
+		&& (value.name === undefined || typeof value.name === 'string');
+}
+
+export function isToolResult(value: unknown): value is ToolResult {
+	if (!isRecord(value)) {
+		return false;
+	}
+	if (value.content !== undefined && !isToolContent(value.content)) {
+		return false;
+	}
+	return value.details === undefined || isRecord(value.details);
+}
+
+function isToolContent(value: unknown): value is ToolResult['content'] {
+	return Array.isArray(value) && value.every((item) => isRecord(item)
+		&& (item.type === undefined || typeof item.type === 'string')
+		&& (item.text === undefined || typeof item.text === 'string'));
+}
+
+function isAssistantMessageEvent(value: unknown): value is AssistantMessageEvent {
+	return isRecord(value)
+		&& typeof value.type === 'string'
+		&& (value.contentIndex === undefined || (typeof value.contentIndex === 'number' && Number.isInteger(value.contentIndex)))
+		&& (value.delta === undefined || typeof value.delta === 'string')
+		&& (value.reason === undefined || typeof value.reason === 'string');
+}
+
+function hasOptionalString(record: Record<string, unknown>, key: string): boolean {
+	return record[key] === undefined || typeof record[key] === 'string';
+}
+
+function hasOptionalBoolean(record: Record<string, unknown>, key: string): boolean {
+	return record[key] === undefined || typeof record[key] === 'boolean';
 }

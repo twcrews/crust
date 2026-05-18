@@ -98,18 +98,17 @@ function getPathSuggestionScore(path: string, query: string): number | undefined
 	}
 
 	const lowerPath = path.toLowerCase();
-	const substringIndex = lowerPath.indexOf(query);
-	if (substringIndex !== -1) {
-		return substringIndex * 10 + path.length / 1000;
-	}
-
 	let queryIndex = 0;
-	let score = 1000;
-	for (let pathIndex = 0; pathIndex < lowerPath.length && queryIndex < query.length; pathIndex++) {
-		if (lowerPath[pathIndex] === query[queryIndex]) {
-			score += pathIndex;
+	let fuzzyScore = 1000;
+	for (let pathIndex = 0; pathIndex < lowerPath.length; pathIndex++) {
+		if (lowerPath.startsWith(query, pathIndex)) {
+			return pathIndex * 10 + path.length / 1000;
+		}
+
+		if (queryIndex < query.length && lowerPath[pathIndex] === query[queryIndex]) {
+			fuzzyScore += pathIndex;
 			queryIndex++;
 		}
 	}
-	return queryIndex === query.length ? score + path.length / 1000 : undefined;
+	return queryIndex === query.length ? fuzzyScore + path.length / 1000 : undefined;
 }
