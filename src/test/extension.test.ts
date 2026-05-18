@@ -5,14 +5,16 @@ import { join, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
-import { isRpcEvent, isRpcResponse, isSlashCommand, normalizeSlashCommand } from '../pi/rpcTypes';
+import { isRpcEvent, isRpcResponse, isSlashCommand, isToolResult, normalizeSlashCommand } from '../pi/rpcTypes';
 import { buildPromptWithIdeContext, extractRestoredPrompt, formatSelectionRange, getIdeContext } from '../ui/ideContext';
 import { getMessageContent, getBlockText, getBlockType, getEntryTimestamp, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from '../ui/messageUtils';
 import { getPathSuggestions } from '../ui/pathAutocomplete';
 import { listSessions } from '../ui/sessionHistory';
 import { getChatWebviewHtml } from '../ui/chatWebview';
+import { parseWebviewMessage } from '../ui/chatTypes';
 import { getToolBody, getToolHeaderDetail, getToolPath, getToolResultText, isFileTool, isRenderableTool } from '../ui/toolUtils';
 import { formatUsageStatus } from '../ui/usageStatus';
+import { errorMessage } from '../utils/errorMessage';
 import { getNonce } from '../utils/nonce';
 
 suite('RPC type guards', () => {
@@ -62,6 +64,19 @@ suite('RPC type guards', () => {
 		assert.strictEqual(normalizeSlashCommand({ name: 'bad', sourceInfo: { path: '/tmp/cmd.md' } }), undefined);
 		assert.strictEqual(isSlashCommand({ name: 'bad', path: 1 }), false);
 	});
+
+	test('validates typed tool results used by tool execution events', () => {
+		assert.strictEqual(isToolResult({ content: [{ type: 'text', text: 'ok' }], details: { diff: '--- a' } }), true);
+		assert.strictEqual(isToolResult({ content: [{ type: 'image' }] }), true);
+		assert.strictEqual(isToolResult({ content: [{ type: 'text', text: 42 }] }), false);
+		assert.strictEqual(isToolResult({ content: 'plain text' }), false);
+		assert.strictEqual(isToolResult({ details: 'not an object' }), false);
+
+		assert.strictEqual(isRpcEvent({ type: 'tool_execution_update', partialResult: { content: [{ type: 'text', text: 'partial' }] } }), true);
+		assert.strictEqual(isRpcEvent({ type: 'tool_execution_update', partialResult: { content: 'bad' } }), false);
+		assert.strictEqual(isRpcEvent({ type: 'tool_execution_end', result: { details: { stdout: 'done' } }, isError: false }), true);
+		assert.strictEqual(isRpcEvent({ type: 'tool_execution_end', result: { details: 1 } }), false);
+	});
 });
 
 suite('Pi RPC client', () => {
@@ -93,6 +108,25 @@ suite('Pi RPC client', () => {
 		await client.abort();
 
 		assert.deepStrictEqual(sentTypes, ['steer', 'abort']);
+	});
+});
+
+suite('Webview message parsing', () => {
+	test('accepts known webview messages and normalizes optional fields', () => {
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'submit', text: 'hello' }), { type: 'submit', text: 'hello', includeIdeContext: true });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'submit', text: 'hello', includeIdeContext: false }), { type: 'submit', text: 'hello', includeIdeContext: false });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'selectModel' }), { type: 'selectModel', modelKey: undefined });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'debug' }), { type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'info' });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'failed', level: 'error' }), { type: 'webviewLog', message: 'failed', details: undefined, level: 'error' });
+	});
+
+	test('rejects malformed or unknown webview messages', () => {
+		assert.strictEqual(parseWebviewMessage(undefined), undefined);
+		assert.strictEqual(parseWebviewMessage({ type: 'submit' }), undefined);
+		assert.strictEqual(parseWebviewMessage({ type: 'steer', text: 1 }), undefined);
+		assert.strictEqual(parseWebviewMessage({ type: 'selectModel', modelKey: 1 }), undefined);
+		assert.strictEqual(parseWebviewMessage({ type: 'pathAutocomplete', requestId: '1', query: 'src' }), undefined);
+		assert.strictEqual(parseWebviewMessage({ type: 'unknown' }), undefined);
 	});
 });
 
@@ -366,6 +400,17 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(source, /header\.title = headerText;/);
 	});
 
+	test('validates extension messages and forwards webview log levels', async () => {
+		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
+		const loggingSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.logging.js'), 'utf8');
+
+		assert.match(mainSource, /function parseExtensionMessage\(value\) \{[\s\S]*typeof value\.type !== "string"[\s\S]*return null;/);
+		assert.match(mainSource, /const message = parseExtensionMessage\(event\.data\);[\s\S]*Ignored invalid extension message[\s\S]*"warn"/);
+		assert.match(loggingSource, /function logWebview\(message, details, level = "info"\)/);
+		assert.match(loggingSource, /const consoleMethod = level === "error" \? console\.error : level === "warn" \? console\.warn : console\.log;/);
+		assert.match(loggingSource, /vscode\.postMessage\(\{ type: "webviewLog", message, details, level \}\);/);
+	});
+
 	test('wires processing state to steering and cancellation controls', async () => {
 		const html = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview.html'), 'utf8');
 		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
@@ -423,6 +468,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(mainSource, /window\.setTimeout\(focusPrompt, 0\);[\s\S]*window\.setTimeout\(focusPrompt, 50\);/);
 		assert.match(mainSource, /focusPromptSoon\(\);[\s\S]*if \(message\.type === "focusPrompt"\) \{[\s\S]*focusPromptSoon\(\);/);
 		assert.match(panelSource, /const chatPanel = new CrustChatPanel\(context, panel\);[\s\S]*chatPanel\.focusPrompt\(\);/);
+		assert.doesNotMatch(panelSource, /currentPanel/);
 		assert.match(panelSource, /private focusPrompt\(\): void \{\s*this\.post\(\{ type: 'focusPrompt' \}\);\s*\}/);
 	});
 
@@ -458,9 +504,11 @@ suite('Webview HTML and nonce generation', () => {
 		assert.ok(!html.includes('{{scriptTags}}'));
 	});
 
-	test('generates 32-character alphanumeric nonces', () => {
+	test('generates 32-character alphanumeric nonces and stringifies unknown errors', () => {
 		const nonce = getNonce();
 		assert.match(nonce, /^[A-Za-z0-9]{32}$/);
 		assert.notStrictEqual(getNonce(), nonce);
+		assert.strictEqual(errorMessage(new Error('boom')), 'boom');
+		assert.strictEqual(errorMessage('plain'), 'plain');
 	});
 });
