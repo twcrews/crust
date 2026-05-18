@@ -18,7 +18,6 @@ const execFileAsync = promisify(execFile);
 
 export class CrustChatPanel implements vscode.Disposable {
 	private static readonly viewType = 'crustChat';
-	private static currentPanel: CrustChatPanel | undefined;
 	private readonly output = vscode.window.createOutputChannel('Crust');
 	private readonly disposables: vscode.Disposable[] = [];
 	private readonly cwd: string | undefined;
@@ -53,19 +52,12 @@ export class CrustChatPanel implements vscode.Disposable {
 				const sessionPath = typeof (state as { sessionPath?: unknown } | undefined)?.sessionPath === 'string'
 					? (state as { sessionPath: string }).sessionPath
 					: undefined;
-				CrustChatPanel.currentPanel = new CrustChatPanel(context, panel, sessionPath);
+				new CrustChatPanel(context, panel, sessionPath);
 			},
 		});
 	}
 
 	private static async open(context: vscode.ExtensionContext): Promise<void> {
-		if (CrustChatPanel.currentPanel) {
-			CrustChatPanel.currentPanel.panel.reveal(vscode.ViewColumn.Beside);
-			await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
-			CrustChatPanel.currentPanel.focusPrompt();
-			return;
-		}
-
 		const panel = vscode.window.createWebviewPanel(
 			CrustChatPanel.viewType,
 			'Crust Chat',
@@ -73,9 +65,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			{ enableScripts: true, retainContextWhenHidden: true },
 		);
 
-		CrustChatPanel.currentPanel = new CrustChatPanel(context, panel);
+		const chatPanel = new CrustChatPanel(context, panel);
 		await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
-		CrustChatPanel.currentPanel.focusPrompt();
+		chatPanel.focusPrompt();
 	}
 
 	private constructor(
@@ -113,9 +105,6 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	dispose(): void {
 		this.log('Disposing chat panel');
-		if (CrustChatPanel.currentPanel === this) {
-			CrustChatPanel.currentPanel = undefined;
-		}
 		this.client.dispose();
 		while (this.disposables.length) {
 			this.disposables.pop()?.dispose();

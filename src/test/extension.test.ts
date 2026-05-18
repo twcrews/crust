@@ -411,14 +411,14 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(renderingSource, /updatePersistedWebviewState\(\{ sessionTitle: title \}\);/);
 	});
 
-	test('focuses the prompt when the chat opens or is revealed', async () => {
+	test('focuses the prompt when the chat opens', async () => {
 		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
 		const panelSource = await readFile(resolve(__dirname, '..', '..', 'src', 'ui', 'chatPanel.ts'), 'utf8');
 
 		assert.match(mainSource, /function focusPrompt\(\) \{\s*prompt\.focus\(\);\s*\}/);
 		assert.match(mainSource, /window\.setTimeout\(focusPrompt, 0\);[\s\S]*window\.setTimeout\(focusPrompt, 50\);/);
 		assert.match(mainSource, /focusPromptSoon\(\);[\s\S]*if \(message\.type === "focusPrompt"\) \{[\s\S]*focusPromptSoon\(\);/);
-		assert.match(panelSource, /CrustChatPanel\.currentPanel\.focusPrompt\(\);/);
+		assert.match(panelSource, /const chatPanel = new CrustChatPanel\(context, panel\);[\s\S]*chatPanel\.focusPrompt\(\);/);
 		assert.match(panelSource, /private focusPrompt\(\): void \{\s*this\.post\(\{ type: 'focusPrompt' \}\);\s*\}/);
 	});
 
