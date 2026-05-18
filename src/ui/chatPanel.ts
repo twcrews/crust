@@ -255,9 +255,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.postError(message);
 		if (this.isPiNotInstalledError(message)) {
 			this.showPiNotInstalledToast(message);
-			return;
 		}
-		this.maybeShowModelConnectionToast(message);
 	}
 
 	private isPiNotInstalledError(message: string): boolean {
@@ -280,10 +278,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.log('Showing Pi not installed notification', { error: details });
 	}
 
-	private maybeShowModelConnectionToast(message: string): void {
-		if (!this.isModelConnectionError(message)) {
-			return;
-		}
+	private showModelConnectionToast(message: string): void {
 		const key = `model-connection:${this.currentModel ? this.modelKey(this.currentModel) : 'unknown'}:${message}`;
 		if (!this.trackActiveNotification(key)) {
 			return;
@@ -305,15 +300,6 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 		this.notifiedErrors.add(key);
 		return true;
-	}
-
-	private isModelConnectionError(message: string): boolean {
-		const text = message.toLowerCase();
-		const modelText = `${this.currentModel?.provider ?? ''} ${this.currentModel?.id ?? ''} ${this.currentModel?.name ?? ''}`.toLowerCase();
-		const mentionsProvider = /\b(?:claude|anthropic|openai|codex)\b/.test(text);
-		const selectedKnownProvider = /\b(?:claude|anthropic|openai|codex)\b/.test(modelText);
-		const looksLikeProviderFailure = /subscription|provider|credential|auth(?:entication|orization)?|login|connect(?:ion)?|rate limit|quota|billing|unavailable|usage limit|token|http\s*4\d\d|http\s*5\d\d|\b4\d\d\b|\b5\d\d\b|bad request|unauthorized|forbidden/.test(text);
-		return looksLikeProviderFailure && (mentionsProvider || selectedKnownProvider);
 	}
 
 	private async newChat(): Promise<void> {
@@ -863,7 +849,6 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.log('Prompt failed', { error: message }, 'error');
 			const assistantMessageId = this.getStreamingTextMessageId(0);
 			this.post({ type: 'appendMessage', id: assistantMessageId, text: `\nError: ${message}` });
-			this.maybeShowModelConnectionToast(message);
 			this.removeActiveLoadingMessage();
 			this.setProcessing(false);
 		}
@@ -925,7 +910,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		} catch (error) {
 			const message = errorMessage(error);
 			this.postError(message, { operation: 'selectModel' });
-			this.maybeShowModelConnectionToast(message);
+			this.showModelConnectionToast(message);
 		}
 	}
 
@@ -949,7 +934,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.showAbortIndicator(event.message);
 			const errorMessage = this.getAssistantErrorMessage(event.message);
 			if (errorMessage) {
-				this.maybeShowModelConnectionToast(errorMessage);
+				this.showModelConnectionToast(errorMessage);
 			}
 			this.setProcessing(false);
 			this.conversationState.isStreaming = false;
@@ -994,9 +979,12 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		if (assistantEvent?.type === 'error') {
-			const message = assistantEvent.reason ?? 'unknown error';
+			const assistantErrorMessage = this.getAssistantErrorMessage(event.message);
+			const message = assistantErrorMessage ?? assistantEvent.reason ?? 'unknown error';
 			this.post({ type: 'appendMessage', id: this.getStreamingTextMessageId(assistantEvent.contentIndex ?? 0), text: `\nError: ${message}` });
-			this.maybeShowModelConnectionToast(message);
+			if (assistantErrorMessage) {
+				this.showModelConnectionToast(assistantErrorMessage);
+			}
 		}
 	}
 
@@ -1009,17 +997,16 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private getAssistantErrorMessage(message: unknown): string | undefined {
-		if (typeof message !== 'object' || message === null) {
+		if (
+			getMessageRole(message) !== 'assistant'
+			|| typeof message !== 'object'
+			|| message === null
+			|| (message as { stopReason?: unknown }).stopReason !== 'error'
+		) {
 			return undefined;
 		}
-		const record = message as { errorMessage?: unknown; error?: unknown; reason?: unknown; stopReason?: unknown };
-		const errorMessage = typeof record.errorMessage === 'string' ? record.errorMessage : undefined;
-		const error = typeof record.error === 'string' ? record.error : undefined;
-		const reason = typeof record.reason === 'string' ? record.reason : undefined;
-		if (record.stopReason === 'aborted' && errorMessage === 'Request was aborted') {
-			return undefined;
-		}
-		return errorMessage || error || reason;
+		const errorMessage = (message as { errorMessage?: unknown }).errorMessage;
+		return typeof errorMessage === 'string' && errorMessage ? errorMessage : 'Unknown error';
 	}
 
 	private isAbortedAssistantMessage(message: unknown): boolean {
