@@ -20,7 +20,12 @@ Follow these steps exactly:
      - `git commit -m "Fix regressions."`
    - If no regression-fix changes were needed, do not create this commit.
 
-3. Determine the next version
+3. Update `AGENTS.md`
+   - Inspect changes since the last update of `AGENTS.md` in the Git history.
+   - Update the file to reflect the current state of the project.
+   - Commit the changes with: `git commit -m "Update agents file."`.
+
+4. Determine the next version
    - Find the latest tag with `git describe --tags --abbrev=0`.
    - Review changes since that tag with commands such as `git log --oneline <latest-tag>..HEAD` and `git diff --stat <latest-tag>..HEAD`.
    - Choose the next version according to semantic versioning:
@@ -29,13 +34,13 @@ Follow these steps exactly:
      - PATCH for backwards-compatible bug fixes, documentation-only changes, and small maintenance changes.
    - Use the repository's existing tag style, which is a bare version like `0.1.0` with no `v` prefix.
 
-4. Update `CHANGELOG.md`
+5. Update `CHANGELOG.md`
    - Add a new version entry above the current latest entry.
    - Summarize the notable changes since the last tag.
    - Preserve the existing changelog style, including compare links at the bottom.
    - Add the appropriate compare link for the new version.
 
-5. Commit and tag
+6. Commit and tag
    - Commit only the changelog changes with:
      - `git commit -m "Update changelog."`
    - Create a tag on the latest commit whose name is exactly the new version:
