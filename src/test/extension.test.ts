@@ -371,8 +371,24 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(html, /<svg class="stop-icon"/);
 		assert.match(source, /vscode\.postMessage\(\{ type: "steer", text \}\);/);
 		assert.match(source, /vscode\.postMessage\(\{ type: "cancel" \}\);/);
+		assert.match(source, /document\.addEventListener\("keydown", \(event\) => \{[\s\S]*event\.key\.toLowerCase\(\) !== "c"[\s\S]*!event\.ctrlKey[\s\S]*!piProcessing[\s\S]*hasCopyableSelection\(\)[\s\S]*requestCancelCurrentTask\("keyboard"\);/);
+		assert.match(source, /function hasCopyableSelection\(\) \{[\s\S]*prompt\.selectionStart !== prompt\.selectionEnd[\s\S]*window\.getSelection\(\);[\s\S]*!selection\.isCollapsed/);
 		assert.match(source, /if \(message\.type === "processing"\) \{[\s\S]*setProcessing\(message\.processing === true\);[\s\S]*\}/);
 		assert.match(renderingSource, /secondary \? " secondary" : ""/);
+	});
+
+	test('supports terminal-style prompt history recall at textarea edges', async () => {
+		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
+		const stateSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.state.js'), 'utf8');
+
+		assert.match(stateSource, /let promptHistory = Array\.isArray\(persistedWebviewState\.promptHistory\)/);
+		assert.match(mainSource, /recordPromptHistory\(text\);[\s\S]*if \(!piProcessing && runSlashCommand\(text\)\)/);
+		assert.match(mainSource, /if \(handleSlashAutocompleteKeydown\(event\)\) \{[\s\S]*return;[\s\S]*\}[\s\S]*if \(handlePromptHistoryKeydown\(event\)\)/);
+		assert.match(mainSource, /if \(event\.key === "ArrowUp"\) \{[\s\S]*!isCursorBeforePromptText\(\)[\s\S]*setPromptFromHistory\(promptHistoryCursor - 1\);/);
+		assert.match(mainSource, /if \(!isCursorAfterPromptText\(\) \|\| promptHistoryCursor >= promptHistory\.length\) \{[\s\S]*setPromptFromHistory\(promptHistoryCursor \+ 1\);/);
+		assert.match(mainSource, /function isCursorBeforePromptText\(\) \{\s*return prompt\.selectionStart === 0 && prompt\.selectionEnd === 0;\s*\}/);
+		assert.match(mainSource, /function isCursorAfterPromptText\(\) \{\s*return prompt\.selectionStart === prompt\.value\.length && prompt\.selectionEnd === prompt\.value\.length;\s*\}/);
+		assert.match(mainSource, /updatePersistedWebviewState\(\{ promptHistory \}\);/);
 	});
 
 	test('supports restoring persisted webview sessions after VS Code reloads', async () => {
