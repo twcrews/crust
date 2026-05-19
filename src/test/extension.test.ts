@@ -11,7 +11,7 @@ import { createConversationState } from '../ui/conversationState';
 import { buildPromptWithIdeContext, extractRestoredPrompt, formatSelectionRange, getIdeContext } from '../ui/ideContext';
 import { getMessageContent, getBlockText, getBlockType, getEntryTimestamp, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from '../ui/messageUtils';
 import { restoreSessionMessages } from '../ui/sessionRestoreRenderer';
-import { getBuiltinSlashCommands, markUnsupportedBuiltinSlashCommands, orderSlashCommands } from '../ui/slashCommands';
+import { getBuiltinSlashCommands, getPiChangelogMarkdown, markUnsupportedBuiltinSlashCommands, orderSlashCommands } from '../ui/slashCommands';
 import { StreamingEventRenderer } from '../ui/streamingEventRenderer';
 import { getPathSuggestions } from '../ui/pathAutocomplete';
 import { listSessions } from '../ui/sessionHistory';
@@ -153,7 +153,7 @@ suite('Slash commands', () => {
 		process.env.PATH = '';
 		try {
 			const commands = await getBuiltinSlashCommands(() => undefined);
-			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'name', 'resume', 'model', 'quit']);
+			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'name', 'resume', 'model', 'changelog', 'quit']);
 			assert.ok(commands.every((command) => command.source === 'builtin'));
 		} finally {
 			process.env.PATH = originalPath;
@@ -175,12 +175,23 @@ suite('Slash commands', () => {
 
 		assert.deepStrictEqual(orderSlashCommands([
 			{ name: 'new', source: 'builtin' },
+			{ name: 'changelog', source: 'builtin' },
 			{ name: 'help', description: 'Show help', source: 'builtin' },
 			{ name: 'doctor', description: 'Diagnose', source: 'builtin' },
 		], [
 			{ name: 'skill:fix', source: 'custom' },
 			{ name: 'project:review', source: 'custom' },
-		]).map((command) => command.name), ['new', 'skill:fix', 'project:review', 'help', 'doctor']);
+		]).map((command) => command.name), ['new', 'changelog', 'skill:fix', 'project:review', 'help', 'doctor']);
+	});
+
+	test('returns fallback text when Pi changelog cannot be loaded', async () => {
+		const originalPath = process.env.PATH;
+		process.env.PATH = '';
+		try {
+			assert.strictEqual(await getPiChangelogMarkdown(() => undefined), 'No changelog entries found.');
+		} finally {
+			process.env.PATH = originalPath;
+		}
 	});
 });
 

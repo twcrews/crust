@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { readFile, realpath } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { SlashCommand } from '../pi/rpcTypes';
 import { errorMessage } from '../utils/errorMessage';
@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 
 type LogFn = (message: string, details?: unknown, level?: CrustLogLevel) => void;
 
-const supportedBuiltinSlashCommandNames = new Set(['new', 'compact', 'name', 'resume', 'model', 'quit']);
+const supportedBuiltinSlashCommandNames = new Set(['new', 'compact', 'name', 'resume', 'model', 'quit', 'changelog']);
 
 export function isSupportedBuiltinSlashCommand(commandName: string): boolean {
 	return supportedBuiltinSlashCommandNames.has(commandName);
@@ -51,8 +51,7 @@ export function dedupeSlashCommands(commands: SlashCommand[]): SlashCommand[] {
 
 export async function getBuiltinSlashCommands(log: LogFn): Promise<SlashCommand[]> {
 	try {
-		const { stdout } = await execFileAsync('which', ['pi']);
-		const piCliPath = await realpath(stdout.trim());
+		const piCliPath = await getPiCliPath();
 		const source = await readFile(join(dirname(piCliPath), 'core', 'slash-commands.js'), 'utf8');
 		const commands: SlashCommand[] = [];
 		for (const match of source.matchAll(/\{\s*name:\s*"([^"]+)",\s*description:\s*(?:"([^"]*)"|`([^`]*)`)\s*\}/g)) {
@@ -65,11 +64,51 @@ export async function getBuiltinSlashCommands(log: LogFn): Promise<SlashCommand[
 	}
 }
 
+export async function getPiChangelogMarkdown(log: LogFn): Promise<string> {
+	try {
+		const piCliPath = await getPiCliPath();
+		const changelogPath = resolve(dirname(piCliPath), '..', 'CHANGELOG.md');
+		const content = await readFile(changelogPath, 'utf8');
+		const entries = parseChangelogEntries(content);
+		return entries.length ? entries.reverse().join('\n\n') : 'No changelog entries found.';
+	} catch (error) {
+		log('Failed to load Pi changelog', { error: errorMessage(error) }, 'warn');
+		return 'No changelog entries found.';
+	}
+}
+
+function parseChangelogEntries(content: string): string[] {
+	const entries: string[] = [];
+	let currentLines: string[] = [];
+	let hasCurrentVersion = false;
+	for (const line of content.split('\n')) {
+		if (line.startsWith('## ')) {
+			if (hasCurrentVersion && currentLines.length) {
+				entries.push(currentLines.join('\n').trim());
+			}
+			hasCurrentVersion = /##\s+\[?(\d+)\.(\d+)\.(\d+)\]?/.test(line);
+			currentLines = hasCurrentVersion ? [line] : [];
+		} else if (hasCurrentVersion) {
+			currentLines.push(line);
+		}
+	}
+	if (hasCurrentVersion && currentLines.length) {
+		entries.push(currentLines.join('\n').trim());
+	}
+	return entries;
+}
+
+async function getPiCliPath(): Promise<string> {
+	const { stdout } = await execFileAsync('which', ['pi']);
+	return realpath(stdout.trim());
+}
+
 const fallbackCommands: SlashCommand[] = [
 	{ name: 'new', description: 'Start a new session', source: 'builtin' },
 	{ name: 'compact', description: 'Manually compact context, optional custom instructions', source: 'builtin' },
 	{ name: 'name', description: 'Set the session name', source: 'builtin' },
 	{ name: 'resume', description: 'Resume a previous session', source: 'builtin' },
 	{ name: 'model', description: 'Select model', source: 'builtin' },
+	{ name: 'changelog', description: 'Show changelog entries', source: 'builtin' },
 	{ name: 'quit', description: 'Close the Crust tab', source: 'builtin' },
 ];

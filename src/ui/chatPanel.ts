@@ -14,7 +14,7 @@ import { createConversationState, resetStreamingState, type ConversationState } 
 import { getPathSuggestions } from './pathAutocomplete';
 import { listSessions } from './sessionHistory';
 import { restoreSessionMessages } from './sessionRestoreRenderer';
-import { getBuiltinSlashCommands, isSupportedBuiltinSlashCommand, orderSlashCommands } from './slashCommands';
+import { getBuiltinSlashCommands, getPiChangelogMarkdown, isSupportedBuiltinSlashCommand, orderSlashCommands } from './slashCommands';
 import { StreamingEventRenderer } from './streamingEventRenderer';
 import { formatUsageStatus } from './usageStatus';
 
@@ -431,10 +431,23 @@ export class CrustChatPanel implements vscode.Disposable {
 			case 'model':
 				this.post({ type: 'focusModel' });
 				return;
+			case 'changelog':
+				await this.showChangelog(commandText.trim() || '/changelog');
+				return;
 			case 'quit':
 				this.panel.dispose();
 				return;
 		}
+	}
+
+	private async showChangelog(invocation: string): Promise<void> {
+		this.log('Showing Pi changelog');
+		if (!this.conversationState.hasSessionTitle) {
+			this.setSessionTitleFromPrompt(invocation);
+		}
+		this.post({ type: 'addMessage', id: createId('user'), role: 'user', text: '', slashCommandLabel: invocation });
+		const changelog = await getPiChangelogMarkdown((message, details, level) => this.log(message, details, level));
+		this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: `# What's New\n\n${changelog}`, secondary: true });
 	}
 
 	private async compactSession(invocation: string, customInstructions: string | undefined): Promise<void> {
