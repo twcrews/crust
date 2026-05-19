@@ -9,7 +9,7 @@ import { parseWebviewMessage, type SessionInfo } from './chatTypes';
 import { getChatWebviewHtml } from './chatWebview';
 import { buildPromptWithIdeContext, getIdeContext } from './ideContext';
 import { getMessageRole } from './messageUtils';
-import { createId, formatErrorForChat, formatSessionDate, getAbortMessage, getInitialCwd, getLastModelFromSessionText, getModelContextWindow, getPostLogDetails, getSessionPath, getWorkspaceStatus, hasMessageUsage, isAbortedAssistantMessage, modelKey, truncate } from './chatPanelUtils';
+import { createId, formatErrorForChat, formatSessionDate, getAbortMessage, getInitialCwd, getLastModelFromSessionText, getModelContextWindow, getSessionPath, getWorkspaceStatus, hasMessageUsage, isAbortedAssistantMessage, modelKey, truncate } from './chatPanelUtils';
 import { createConversationState, resetStreamingState, type ConversationState } from './conversationState';
 import { getPathSuggestions } from './pathAutocomplete';
 import { listSessions } from './sessionHistory';
@@ -170,7 +170,6 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.log('Ignoring invalid webview message', undefined, 'warn');
 			return;
 		}
-		this.log('Received webview message', { type: message.type });
 		switch (message.type) {
 			case 'submit':
 				await this.submitPrompt(message.text ?? '', message.includeIdeContext !== false);
@@ -200,7 +199,9 @@ export class CrustChatPanel implements vscode.Disposable {
 				await this.refreshSlashCommands();
 				break;
 			case 'webviewLog':
-				this.log(`Webview: ${message.message ?? ''}`, message.details, message.level ?? 'info');
+				if (message.level === 'warn' || message.level === 'error') {
+					this.log(`Webview: ${message.message ?? ''}`, message.details, message.level);
+				}
 				break;
 		}
 	}
@@ -746,11 +747,10 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private post(message: unknown): void {
-		this.log('Posting webview message', getPostLogDetails(message));
 		void this.panel.webview.postMessage(message);
 	}
 
-private postError(message: string, details?: unknown): void {
+	private postError(message: string, details?: unknown): void {
 		this.log(message, details, 'error');
 		this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: formatErrorForChat(message), error: true });
 	}

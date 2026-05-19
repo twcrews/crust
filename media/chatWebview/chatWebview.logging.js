@@ -1,5 +1,12 @@
+function shouldLogWebview(level = "info") {
+	return level === "warn" || level === "error";
+}
+
 function logWebview(message, details, level = "info") {
-	const consoleMethod = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
+	if (!shouldLogWebview(level)) {
+		return;
+	}
+	const consoleMethod = level === "error" ? console.error : console.warn;
 	if (details === undefined) {
 		consoleMethod("[Crust]", message);
 		return;
@@ -9,7 +16,9 @@ function logWebview(message, details, level = "info") {
 
 function postWebviewLog(message, details, level = "info") {
 	logWebview(message, details, level);
-	vscode.postMessage({ type: "webviewLog", message, details, level });
+	if (shouldLogWebview(level)) {
+		vscode.postMessage({ type: "webviewLog", message, details, level });
+	}
 }
 
 function getMessageLogDetails(message) {
