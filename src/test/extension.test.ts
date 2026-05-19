@@ -654,13 +654,16 @@ suite('Webview HTML and nonce generation', () => {
 		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
 		const css = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.markdown.css'), 'utf8');
 
-		assert.match(source, /element\.append\(createCodeBlock\(codeLines\.join\("\\n"\)\)\);/);
+		assert.match(source, /element\.innerHTML = window\.crustMarkdown\.render\(markdown\);/);
+		assert.match(source, /function enhanceRenderedMarkdown\(element\)[\s\S]*enhanceTaskListItems\(element\);[\s\S]*wrapCodeBlocks\(element\);[\s\S]*wrapTables\(element\);[\s\S]*hardenLinks\(element\);/);
+		assert.match(source, /checkbox\.className = "markdown-task-checkbox";/);
 		assert.match(source, /button\.className = "markdown-code-copy";/);
 		assert.match(source, /button\.setAttribute\("aria-label", "Copy code block"\);/);
-		assert.match(source, /await copyTextToClipboard\(text\);/);
+		assert.match(source, /await copyTextToClipboard\(code\.textContent \?\? ""\);/);
 		assert.match(source, /navigator\.clipboard[\s\S]*writeText\(text\)/);
 		assert.match(source, /document\.execCommand\("copy"\)/);
 		assert.match(source, /function createCopyIcon\(\)/);
+		assert.match(source, /function isSafeMarkdownUrl\(href\)[\s\S]*url\.protocol === "http:"[\s\S]*url\.protocol === "https:"[\s\S]*url\.protocol === "mailto:"/);
 		assert.match(css, /\.markdown-code-block \{[\s\S]*position: relative;/);
 		assert.match(css, /\.markdown-code-copy\.copied \{[\s\S]*var\(--vscode-testing-iconPassed/);
 	});
@@ -675,6 +678,8 @@ suite('Webview HTML and nonce generation', () => {
 		const html = getChatWebviewHtml(extensionUri, webview);
 		assert.ok(html.includes('vscode-resource:'));
 		assert.ok(html.includes('chatWebview.base.css'));
+		assert.ok(html.includes('generated/markdown-it.bundle.js'));
+		assert.ok(html.indexOf('generated/markdown-it.bundle.js') < html.indexOf('chatWebview.rendering.js'));
 		assert.ok(html.includes('chatWebview.main.js'));
 		assert.ok(html.includes('branding/icon.svg'));
 		assert.ok(!html.includes('{{nonce}}'));

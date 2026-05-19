@@ -268,140 +268,125 @@ function setMarkdownContent(element, markdown) {
 
 function renderMarkdown(element, markdown) {
 	element.textContent = "";
-	const lines = markdown.replace(/\r\n/g, "\n").split("\n");
-	let index = 0;
-	let paragraph = [];
-
-	function flushParagraph() {
-		if (!paragraph.length) {
-			return;
-		}
-		const p = document.createElement("p");
-		renderInline(p, paragraph.join("\n"));
-		element.append(p);
-		paragraph = [];
+	if (!window.crustMarkdown || typeof window.crustMarkdown.render !== "function") {
+		renderPlainMarkdownFallback(element, markdown);
+		return;
 	}
 
-	while (index < lines.length) {
-		const line = lines[index];
-		const fence = line.match(/^\s*```(.*)$/);
-		if (fence) {
-			flushParagraph();
-			index++;
-			const codeLines = [];
-			while (index < lines.length && !/^\s*```/.test(lines[index])) {
-				codeLines.push(lines[index]);
-				index++;
-			}
-			if (index < lines.length) {
-				index++;
-			}
-			element.append(createCodeBlock(codeLines.join("\n")));
-			continue;
-		}
-
-		if (!line.trim()) {
-			flushParagraph();
-			index++;
-			continue;
-		}
-
-		const heading = line.match(/^(#{1,6})\s+(.+)$/);
-		if (heading) {
-			flushParagraph();
-			const headingElement = document.createElement("h" + heading[1].length);
-			renderInline(headingElement, heading[2]);
-			element.append(headingElement);
-			index++;
-			continue;
-		}
-
-		if (isMarkdownDivider(line)) {
-			flushParagraph();
-			element.append(document.createElement("hr"));
-			index++;
-			continue;
-		}
-
-		if (isTableStart(lines, index)) {
-			flushParagraph();
-			const tableResult = renderTable(lines, index);
-			element.append(tableResult.element);
-			index = tableResult.nextIndex;
-			continue;
-		}
-
-		const listItem = line.match(/^\s*[-*+]\s+(.+)$/);
-		if (listItem) {
-			flushParagraph();
-			const list = document.createElement("ul");
-			while (index < lines.length) {
-				const item = lines[index].match(/^\s*[-*+]\s+(.+)$/);
-				if (!item) {
-					break;
-				}
-				const li = document.createElement("li");
-				renderInline(li, item[1]);
-				list.append(li);
-				index++;
-			}
-			element.append(list);
-			continue;
-		}
-
-		const quote = line.match(/^>\s?(.*)$/);
-		if (quote) {
-			flushParagraph();
-			const blockquote = document.createElement("blockquote");
-			const quoteLines = [];
-			while (index < lines.length) {
-				const quoteLine = lines[index].match(/^>\s?(.*)$/);
-				if (!quoteLine) {
-					break;
-				}
-				quoteLines.push(quoteLine[1]);
-				index++;
-			}
-			renderInline(blockquote, quoteLines.join("\n"));
-			element.append(blockquote);
-			continue;
-		}
-
-		paragraph.push(line);
-		index++;
-	}
-	flushParagraph();
+	element.innerHTML = window.crustMarkdown.render(markdown);
+	enhanceRenderedMarkdown(element);
 }
 
-function createCodeBlock(text) {
-	const wrapper = document.createElement("div");
-	wrapper.className = "markdown-code-block";
-
+function renderPlainMarkdownFallback(element, markdown) {
 	const pre = document.createElement("pre");
-	const code = document.createElement("code");
-	code.textContent = text;
-	pre.append(code);
-	wrapper.append(pre);
+	pre.textContent = markdown;
+	element.append(pre);
+}
 
-	const button = document.createElement("button");
-	button.type = "button";
-	button.className = "markdown-code-copy";
-	button.setAttribute("aria-label", "Copy code block");
-	button.title = "Copy code";
-	button.append(createCopyIcon());
-	button.addEventListener("click", async () => {
-		const copied = await copyTextToClipboard(text);
-		button.classList.toggle("copied", copied);
-		button.setAttribute("aria-label", copied ? "Copied code block" : "Copy code block");
-		button.title = copied ? "Copied" : "Copy code";
-		window.setTimeout(() => {
-			button.classList.remove("copied");
-			button.setAttribute("aria-label", "Copy code block");
-			button.title = "Copy code";
-		}, 1400);
-	});
-	wrapper.append(button);
-	return wrapper;
+function enhanceRenderedMarkdown(element) {
+	enhanceTaskListItems(element);
+	wrapCodeBlocks(element);
+	wrapTables(element);
+	hardenLinks(element);
+}
+
+function enhanceTaskListItems(element) {
+	for (const item of Array.from(element.querySelectorAll("li"))) {
+		const target = getTaskListMarkerTarget(item);
+		const marker = target?.textContent?.match(/^\[( |x|X)\]\s*/);
+		if (!target || !marker) {
+			continue;
+		}
+
+		target.textContent = target.textContent.slice(marker[0].length);
+		const checkbox = document.createElement("input");
+		checkbox.type = "checkbox";
+		checkbox.checked = marker[1].toLowerCase() === "x";
+		checkbox.disabled = true;
+		checkbox.className = "markdown-task-checkbox";
+		checkbox.setAttribute("aria-label", checkbox.checked ? "Completed task" : "Incomplete task");
+		item.classList.add("markdown-task-list-item");
+		item.prepend(checkbox, document.createTextNode(" "));
+	}
+}
+
+function getTaskListMarkerTarget(item) {
+	if (item.firstChild?.nodeType === Node.TEXT_NODE) {
+		return item.firstChild;
+	}
+	const firstElement = item.firstElementChild;
+	if (firstElement?.tagName === "P" && firstElement.firstChild?.nodeType === Node.TEXT_NODE) {
+		return firstElement.firstChild;
+	}
+	return undefined;
+}
+
+function wrapCodeBlocks(element) {
+	for (const code of Array.from(element.querySelectorAll("pre > code"))) {
+		const pre = code.parentElement;
+		if (!pre || pre.parentElement?.classList.contains("markdown-code-block")) {
+			continue;
+		}
+
+		const wrapper = document.createElement("div");
+		wrapper.className = "markdown-code-block";
+		pre.replaceWith(wrapper);
+		wrapper.append(pre);
+
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "markdown-code-copy";
+		button.setAttribute("aria-label", "Copy code block");
+		button.title = "Copy code";
+		button.append(createCopyIcon());
+		button.addEventListener("click", async () => {
+			const copied = await copyTextToClipboard(code.textContent ?? "");
+			button.classList.toggle("copied", copied);
+			button.setAttribute("aria-label", copied ? "Copied code block" : "Copy code block");
+			button.title = copied ? "Copied" : "Copy code";
+			window.setTimeout(() => {
+				button.classList.remove("copied");
+				button.setAttribute("aria-label", "Copy code block");
+				button.title = "Copy code";
+			}, 1400);
+		});
+		wrapper.append(button);
+	}
+}
+
+function wrapTables(element) {
+	for (const table of Array.from(element.querySelectorAll("table"))) {
+		if (table.parentElement?.classList.contains("markdown-table-wrapper")) {
+			continue;
+		}
+
+		const wrapper = document.createElement("div");
+		wrapper.className = "markdown-table-wrapper";
+		table.replaceWith(wrapper);
+		wrapper.append(table);
+	}
+}
+
+function hardenLinks(element) {
+	for (const link of Array.from(element.querySelectorAll("a[href]"))) {
+		const href = link.getAttribute("href") ?? "";
+		if (!isSafeMarkdownUrl(href)) {
+			link.removeAttribute("href");
+			continue;
+		}
+
+		link.setAttribute("rel", "noreferrer noopener");
+		link.setAttribute("target", "_blank");
+	}
+}
+
+function isSafeMarkdownUrl(href) {
+	try {
+		const url = new URL(href, "https://crust.local");
+		return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:";
+	} catch (_error) {
+		return false;
+	}
 }
 
 async function copyTextToClipboard(text) {
@@ -455,148 +440,6 @@ function createCopyIcon() {
 	return svg;
 }
 
-function isMarkdownDivider(line) {
-	return /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line);
-}
-
-function isTableStart(lines, index) {
-	return index + 1 < lines.length && hasTablePipe(lines[index]) && isTableSeparatorLine(lines[index + 1]);
-}
-
-function hasTablePipe(line) {
-	return /(^|[^\\])\|/.test(line);
-}
-
-function isTableSeparatorLine(line) {
-	const cells = splitTableRow(line).map((cell) => cell.trim());
-	return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
-}
-
-function splitTableRow(line) {
-	let value = line.trim();
-	if (value.startsWith("|")) {
-		value = value.slice(1);
-	}
-	if (value.endsWith("|") && !value.endsWith("\\|")) {
-		value = value.slice(0, -1);
-	}
-
-	const cells = [];
-	let current = "";
-	let escaped = false;
-	for (const character of value) {
-		if (escaped) {
-			current += character;
-			escaped = false;
-			continue;
-		}
-		if (character === "\\") {
-			escaped = true;
-			continue;
-		}
-		if (character === "|") {
-			cells.push(current.trim());
-			current = "";
-			continue;
-		}
-		current += character;
-	}
-	if (escaped) {
-		current += "\\";
-	}
-	cells.push(current.trim());
-	return cells;
-}
-
-function renderTable(lines, startIndex) {
-	const headers = splitTableRow(lines[startIndex]);
-	const alignments = splitTableRow(lines[startIndex + 1]).map((cell) => {
-		const trimmed = cell.trim();
-		if (trimmed.startsWith(":") && trimmed.endsWith(":")) {
-			return "center";
-		}
-		if (trimmed.endsWith(":")) {
-			return "right";
-		}
-		if (trimmed.startsWith(":")) {
-			return "left";
-		}
-		return "";
-	});
-	let index = startIndex + 2;
-
-	const wrapper = document.createElement("div");
-	wrapper.className = "markdown-table-wrapper";
-	const table = document.createElement("table");
-	const thead = document.createElement("thead");
-	const headerRow = document.createElement("tr");
-	for (const [cellIndex, header] of headers.entries()) {
-		const th = document.createElement("th");
-		if (alignments[cellIndex]) {
-			th.style.textAlign = alignments[cellIndex];
-		}
-		renderInline(th, header);
-		headerRow.append(th);
-	}
-	thead.append(headerRow);
-	table.append(thead);
-
-	const tbody = document.createElement("tbody");
-	while (index < lines.length && lines[index].trim() && hasTablePipe(lines[index])) {
-		const row = document.createElement("tr");
-		const cells = splitTableRow(lines[index]);
-		for (let cellIndex = 0; cellIndex < headers.length; cellIndex++) {
-			const td = document.createElement("td");
-			if (alignments[cellIndex]) {
-				td.style.textAlign = alignments[cellIndex];
-			}
-			renderInline(td, cells[cellIndex] ?? "");
-			row.append(td);
-		}
-		tbody.append(row);
-		index++;
-	}
-	table.append(tbody);
-	wrapper.append(table);
-	return { element: wrapper, nextIndex: index };
-}
-
-// Minimal inline renderer for common Pi output. Known limitations: it does not
-// handle escaped delimiters, nested formatting, or full Markdown inline grammar;
-// unmatched/unsupported constructs fall back to plain text around matched tokens.
-function renderInline(element, text) {
-	const pattern = /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
-	let lastIndex = 0;
-	for (const match of text.matchAll(pattern)) {
-		appendInlineText(element, text.slice(lastIndex, match.index));
-		const token = match[0];
-		if (token.startsWith("`")) {
-			const code = document.createElement("code");
-			code.textContent = token.slice(1, -1);
-			element.append(code);
-		} else if (token.startsWith("**") || token.startsWith("__")) {
-			const strong = document.createElement("strong");
-			strong.textContent = token.slice(2, -2);
-			element.append(strong);
-		} else {
-			const emphasis = document.createElement("em");
-			emphasis.textContent = token.slice(1, -1);
-			element.append(emphasis);
-		}
-		lastIndex = match.index + token.length;
-	}
-	appendInlineText(element, text.slice(lastIndex));
-}
-
-function appendInlineText(element, text) {
-	const parts = text.split("\n");
-	for (const [index, part] of parts.entries()) {
-		if (index > 0) {
-			element.append(document.createElement("br"));
-		}
-		element.append(document.createTextNode(part));
-	}
-}
 
 function upsertTool(message) {
 	let element = document.getElementById(message.id);

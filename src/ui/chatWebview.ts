@@ -23,6 +23,7 @@ export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Web
 		})
 		.join('\n\t');
 	const scriptFiles = [
+		'generated/markdown-it.bundle.js',
 		'chatWebview.state.js',
 		'chatWebview.logging.js',
 		'chatWebview.rendering.js',

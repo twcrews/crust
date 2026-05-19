@@ -79,6 +79,13 @@
 	padding-left: 10px;
 	color: var(--vscode-descriptionForeground);
 }
+.markdown-task-list-item {
+	list-style-type: none;
+}
+.markdown-task-checkbox {
+	margin: 0 0.35em 0 -1.35em;
+	vertical-align: text-bottom;
+}
 .message.assistant code,
 .user-message-body code,
 .thinking-body code,

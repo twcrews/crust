@@ -23,8 +23,8 @@ const esbuildProblemMatcherPlugin = {
 	},
 };
 
-async function main() {
-	const ctx = await esbuild.context({
+async function createExtensionContext() {
+	return esbuild.context({
 		entryPoints: [
 			'src/extension.ts'
 		],
@@ -42,11 +42,33 @@ async function main() {
 			esbuildProblemMatcherPlugin,
 		],
 	});
+}
+
+async function createWebviewMarkdownContext() {
+	return esbuild.context({
+		entryPoints: ['src/webview/markdownRenderer.ts'],
+		bundle: true,
+		format: 'iife',
+		minify: true,
+		sourcemap: false,
+		sourcesContent: false,
+		platform: 'browser',
+		outfile: 'media/chatWebview/generated/markdown-it.bundle.js',
+		logLevel: 'silent',
+		plugins: [esbuildProblemMatcherPlugin],
+	});
+}
+
+async function main() {
+	const contexts = await Promise.all([
+		createExtensionContext(),
+		createWebviewMarkdownContext(),
+	]);
 	if (watch) {
-		await ctx.watch();
+		await Promise.all(contexts.map((ctx) => ctx.watch()));
 	} else {
-		await ctx.rebuild();
-		await ctx.dispose();
+		await Promise.all(contexts.map((ctx) => ctx.rebuild()));
+		await Promise.all(contexts.map((ctx) => ctx.dispose()));
 	}
 }
 
