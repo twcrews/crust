@@ -80,6 +80,10 @@
 .slash-autocomplete-option:hover {
 	background: var(--vscode-quickInputList-focusBackground, var(--vscode-list-hoverBackground));
 }
+.slash-autocomplete-option.disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
 .slash-autocomplete-command {
 	flex: 0 0 auto;
 	font-family: var(--vscode-editor-font-family, monospace);

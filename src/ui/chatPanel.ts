@@ -14,7 +14,7 @@ import { createConversationState, resetStreamingState, type ConversationState } 
 import { getPathSuggestions } from './pathAutocomplete';
 import { listSessions } from './sessionHistory';
 import { restoreSessionMessages } from './sessionRestoreRenderer';
-import { dedupeSlashCommands, getBuiltinSlashCommands } from './slashCommands';
+import { getBuiltinSlashCommands, isSupportedBuiltinSlashCommand, orderSlashCommands } from './slashCommands';
 import { StreamingEventRenderer } from './streamingEventRenderer';
 import { formatUsageStatus } from './usageStatus';
 
@@ -363,10 +363,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private postSlashCommands(): void {
-		const commands = dedupeSlashCommands([
-			...this.builtinSlashCommands,
-			...this.piSlashCommands,
-		]);
+		const commands = orderSlashCommands(this.builtinSlashCommands, this.piSlashCommands);
 		this.log('Posting slash commands', {
 			cwd: this.cwd,
 			builtinCount: this.builtinSlashCommands.length,
@@ -412,6 +409,11 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private async runBuiltinSlashCommand(commandName: string, commandText: string): Promise<void> {
 		const args = commandText.trim().slice(commandName.length + 1).trim();
+		if (!isSupportedBuiltinSlashCommand(commandName)) {
+			this.postError(`/${commandName} is a Pi TUI command and is not available in Crust yet.`);
+			return;
+		}
+
 		switch (commandName) {
 			case 'new':
 				await this.newChat();
@@ -429,8 +431,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			case 'model':
 				this.post({ type: 'focusModel' });
 				return;
-			default:
-				this.postError(`/${commandName} is a Pi TUI command and is not available in Crust yet.`);
+			case 'quit':
+				this.panel.dispose();
+				return;
 		}
 	}
 

@@ -10,6 +10,35 @@ const execFileAsync = promisify(execFile);
 
 type LogFn = (message: string, details?: unknown, level?: CrustLogLevel) => void;
 
+const supportedBuiltinSlashCommandNames = new Set(['new', 'compact', 'name', 'resume', 'model', 'quit']);
+
+export function isSupportedBuiltinSlashCommand(commandName: string): boolean {
+	return supportedBuiltinSlashCommandNames.has(commandName);
+}
+
+export function markUnsupportedBuiltinSlashCommands(commands: SlashCommand[]): SlashCommand[] {
+	return commands.map((command) => markUnsupportedBuiltinSlashCommand(command));
+}
+
+export function orderSlashCommands(builtinCommands: SlashCommand[], piCommands: SlashCommand[]): SlashCommand[] {
+	const supportedBuiltinCommands = builtinCommands.filter((command) => command.source !== 'builtin' || isSupportedBuiltinSlashCommand(command.name));
+	const unsupportedBuiltinCommands = builtinCommands
+		.filter((command) => command.source === 'builtin' && !isSupportedBuiltinSlashCommand(command.name))
+		.map((command) => markUnsupportedBuiltinSlashCommand(command));
+	return dedupeSlashCommands([
+		...supportedBuiltinCommands,
+		...piCommands,
+		...unsupportedBuiltinCommands,
+	]);
+}
+
+function markUnsupportedBuiltinSlashCommand(command: SlashCommand): SlashCommand {
+	if (command.source !== 'builtin' || isSupportedBuiltinSlashCommand(command.name)) {
+		return command;
+	}
+	return { ...command, description: 'not supported yet', disabled: true };
+}
+
 export function dedupeSlashCommands(commands: SlashCommand[]): SlashCommand[] {
 	const byName = new Map<string, SlashCommand>();
 	for (const command of commands) {
@@ -42,4 +71,5 @@ const fallbackCommands: SlashCommand[] = [
 	{ name: 'name', description: 'Set the session name', source: 'builtin' },
 	{ name: 'resume', description: 'Resume a previous session', source: 'builtin' },
 	{ name: 'model', description: 'Select model', source: 'builtin' },
+	{ name: 'quit', description: 'Close the Crust tab', source: 'builtin' },
 ];

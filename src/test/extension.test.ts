@@ -11,7 +11,7 @@ import { createConversationState } from '../ui/conversationState';
 import { buildPromptWithIdeContext, extractRestoredPrompt, formatSelectionRange, getIdeContext } from '../ui/ideContext';
 import { getMessageContent, getBlockText, getBlockType, getEntryTimestamp, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from '../ui/messageUtils';
 import { restoreSessionMessages } from '../ui/sessionRestoreRenderer';
-import { getBuiltinSlashCommands } from '../ui/slashCommands';
+import { getBuiltinSlashCommands, markUnsupportedBuiltinSlashCommands, orderSlashCommands } from '../ui/slashCommands';
 import { StreamingEventRenderer } from '../ui/streamingEventRenderer';
 import { getPathSuggestions } from '../ui/pathAutocomplete';
 import { listSessions } from '../ui/sessionHistory';
@@ -153,11 +153,34 @@ suite('Slash commands', () => {
 		process.env.PATH = '';
 		try {
 			const commands = await getBuiltinSlashCommands(() => undefined);
-			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'name', 'resume', 'model']);
+			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'name', 'resume', 'model', 'quit']);
 			assert.ok(commands.every((command) => command.source === 'builtin'));
 		} finally {
 			process.env.PATH = originalPath;
 		}
+	});
+
+	test('marks unsupported built-in slash commands disabled and orders them last', () => {
+		const commands = markUnsupportedBuiltinSlashCommands([
+			{ name: 'compact', description: 'Compact context', source: 'builtin' },
+			{ name: 'help', description: 'Show help', source: 'builtin' },
+			{ name: 'project:fix', description: 'Fix', source: 'custom' },
+		]);
+
+		assert.deepStrictEqual(commands, [
+			{ name: 'compact', description: 'Compact context', source: 'builtin' },
+			{ name: 'help', description: 'not supported yet', source: 'builtin', disabled: true },
+			{ name: 'project:fix', description: 'Fix', source: 'custom' },
+		]);
+
+		assert.deepStrictEqual(orderSlashCommands([
+			{ name: 'new', source: 'builtin' },
+			{ name: 'help', description: 'Show help', source: 'builtin' },
+			{ name: 'doctor', description: 'Diagnose', source: 'builtin' },
+		], [
+			{ name: 'skill:fix', source: 'custom' },
+			{ name: 'project:review', source: 'custom' },
+		]).map((command) => command.name), ['new', 'skill:fix', 'project:review', 'help', 'doctor']);
 	});
 });
 
@@ -558,20 +581,31 @@ suite('Session history', () => {
 suite('Webview HTML and nonce generation', () => {
 	test('ranks slash command autocomplete fuzzily and formats sourceInfo metadata', async () => {
 		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.autocomplete.js'), 'utf8');
-		const api = runInNewContext(`${source}\n({ getSlashCommandSuggestions, formatSlashCommandSource });`, {
+		const statusMessages: Array<{ message: string; error: boolean }> = [];
+		const api = runInNewContext(`${source}\n({ getSlashCommandSuggestions, formatSlashCommandSource, runSlashCommand });`, {
+			prompt: { value: '' },
 			slashCommands: [
 				{ name: 'compact', command: '/compact' },
 				{ name: 'project:fix', command: '/project:fix' },
 				{ name: 'resume', command: '/resume' },
+				{ name: 'help', command: '/help', description: 'not supported yet', disabled: true },
 			],
+			setStatus: (message: string, error: boolean) => statusMessages.push({ message, error }),
 		}) as {
-			getSlashCommandSuggestions: (value: string) => Array<{ command: string }>;
+			getSlashCommandSuggestions: (value: string) => Array<{ command: string; description?: string; disabled?: boolean }>;
 			formatSlashCommandSource: (command: unknown) => string;
+			runSlashCommand: (text: string) => boolean;
 		};
 
 		assert.deepStrictEqual(api.getSlashCommandSuggestions('/fx').map((suggestion) => suggestion.command), ['/project:fix']);
 		assert.deepStrictEqual(api.getSlashCommandSuggestions('/co').map((suggestion) => suggestion.command).slice(0, 1), ['/compact']);
 		assert.strictEqual(api.formatSlashCommandSource({ source: 'custom', sourceInfo: { scope: 'project', path: '/repo/.pi/commands/fix.md' } }), 'custom · project · /repo/.pi/commands/fix.md');
+		assert.deepStrictEqual(api.getSlashCommandSuggestions('/').map((suggestion) => suggestion.command).slice(-1), ['/help']);
+		assert.deepStrictEqual(api.getSlashCommandSuggestions('/he').map(({ command, description, disabled }) => ({ command, description, disabled })), [
+			{ command: '/help', description: 'not supported yet', disabled: true },
+		]);
+		assert.strictEqual(api.runSlashCommand('/help'), true);
+		assert.deepStrictEqual(statusMessages.at(-1), { message: '/help is not supported yet', error: true });
 	});
 
 	test('renders user messages with context labels and markdown bodies', async () => {
@@ -611,7 +645,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(mainSource, /case "markdownSettings":[\s\S]*allowRawHtml: value\.allowRawHtml === true/);
 		assert.match(mainSource, /const message = parseExtensionMessage\(event\.data\);[\s\S]*Ignored invalid extension message[\s\S]*"warn"/);
 		assert.match(loggingSource, /function logWebview\(message, details, level = "info"\)/);
-		assert.match(loggingSource, /const consoleMethod = level === "error" \? console\.error : level === "warn" \? console\.warn : console\.log;/);
+		assert.match(loggingSource, /const consoleMethod = level === "error" \? console\.error : console\.warn;/);
 		assert.match(loggingSource, /vscode\.postMessage\(\{ type: "webviewLog", message, details, level \}\);/);
 	});
 

@@ -4,7 +4,8 @@ function setSlashCommands(commands) {
 		.map((command) => ({
 			name: command.name,
 			command: "/" + command.name,
-			description: command.description || formatSlashCommandSource(command),
+			description: command.description || (command.disabled === true ? "not supported yet" : formatSlashCommandSource(command)),
+			disabled: command.disabled === true,
 			source: command.source,
 		}));
 	logWebview("Slash commands updated", { count: slashCommands.length, commands: slashCommands.slice(0, 20).map((command) => command.command) });
@@ -28,6 +29,10 @@ function runSlashCommand(text) {
 	const command = slashCommands.find((candidate) => candidate.name === commandName);
 	if (!command) {
 		setStatus("Unknown slash command: " + trimmed, true);
+		return true;
+	}
+	if (command.disabled) {
+		setStatus(command.command + " is not supported yet", true);
 		return true;
 	}
 	prompt.value = "";
@@ -79,7 +84,7 @@ function getSlashCommandSuggestions(value) {
 	return slashCommands
 		.map((candidate) => ({ ...candidate, score: getSlashCommandScore(candidate, query) }))
 		.filter((candidate) => candidate.score !== undefined)
-		.sort((a, b) => a.score - b.score || a.command.length - b.command.length || a.command.localeCompare(b.command));
+		.sort((a, b) => Number(Boolean(a.disabled)) - Number(Boolean(b.disabled)) || a.score - b.score || a.command.length - b.command.length || a.command.localeCompare(b.command));
 }
 
 function getSlashCommandScore(candidate, query) {
@@ -157,6 +162,11 @@ function renderSlashAutocomplete() {
 		const option = document.createElement("button");
 		option.type = "button";
 		option.className = "slash-autocomplete-option";
+		if (suggestion.disabled) {
+			option.classList.add("disabled");
+			option.disabled = true;
+			option.setAttribute("aria-disabled", "true");
+		}
 		option.id = "slash-autocomplete-option-" + index;
 		option.setAttribute("role", "option");
 		option.setAttribute("aria-selected", String(index === activeSlashSuggestionIndex));
@@ -259,6 +269,11 @@ function selectSlashSuggestion(index) {
 		} else {
 			hideSlashAutocomplete();
 		}
+		prompt.focus();
+		return;
+	}
+	if (suggestion.disabled) {
+		setStatus(suggestion.command + " is not supported yet", true);
 		prompt.focus();
 		return;
 	}

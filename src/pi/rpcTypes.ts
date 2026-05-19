@@ -114,6 +114,7 @@ export type SlashCommand = {
 	location?: string;
 	path?: string;
 	sourceInfo?: SlashCommandSourceInfo;
+	disabled?: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -139,7 +140,8 @@ export function isSlashCommand(value: unknown): value is SlashCommand {
 		&& (value.source === undefined || typeof value.source === 'string')
 		&& (value.location === undefined || typeof value.location === 'string')
 		&& (value.path === undefined || typeof value.path === 'string')
-		&& (value.sourceInfo === undefined || isSlashCommandSourceInfo(value.sourceInfo));
+		&& (value.sourceInfo === undefined || isSlashCommandSourceInfo(value.sourceInfo))
+		&& (value.disabled === undefined || typeof value.disabled === 'boolean');
 }
 
 export function isSlashCommandSourceInfo(value: unknown): value is SlashCommandSourceInfo {
