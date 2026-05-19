@@ -583,6 +583,7 @@ suite('Webview HTML and nonce generation', () => {
 		const loggingSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.logging.js'), 'utf8');
 
 		assert.match(mainSource, /function parseExtensionMessage\(value\) \{[\s\S]*typeof value\.type !== "string"[\s\S]*return null;/);
+		assert.match(mainSource, /case "markdownSettings":[\s\S]*allowRawHtml: value\.allowRawHtml === true/);
 		assert.match(mainSource, /const message = parseExtensionMessage\(event\.data\);[\s\S]*Ignored invalid extension message[\s\S]*"warn"/);
 		assert.match(loggingSource, /function logWebview\(message, details, level = "info"\)/);
 		assert.match(loggingSource, /const consoleMethod = level === "error" \? console\.error : level === "warn" \? console\.warn : console\.log;/);
@@ -616,6 +617,12 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(mainSource, /function isCursorBeforePromptText\(\) \{\s*return prompt\.selectionStart === 0 && prompt\.selectionEnd === 0;\s*\}/);
 		assert.match(mainSource, /function isCursorAfterPromptText\(\) \{\s*return prompt\.selectionStart === prompt\.value\.length && prompt\.selectionEnd === prompt\.value\.length;\s*\}/);
 		assert.match(mainSource, /updatePersistedWebviewState\(\{ promptHistory \}\);/);
+	});
+
+	test('contributes the raw HTML markdown setting disabled by default', async () => {
+		const packageJson = JSON.parse(await readFile(resolve(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes?: { configuration?: { properties?: Record<string, { default?: unknown }> } } };
+
+		assert.strictEqual(packageJson.contributes?.configuration?.properties?.['crust.markdown.allowRawHtml']?.default, false);
 	});
 
 	test('supports restoring persisted webview sessions after VS Code reloads', async () => {
@@ -656,6 +663,7 @@ suite('Webview HTML and nonce generation', () => {
 
 		assert.match(source, /element\.innerHTML = window\.crustMarkdown\.render\(markdown\);/);
 		assert.match(source, /function enhanceRenderedMarkdown\(element\)[\s\S]*enhanceTaskListItems\(element\);[\s\S]*wrapCodeBlocks\(element\);[\s\S]*wrapTables\(element\);[\s\S]*hardenLinks\(element\);/);
+		assert.match(source, /function setMarkdownSettings\(settings\)[\s\S]*setAllowRawHtml\(settings\.allowRawHtml === true\)[\s\S]*querySelectorAll\("\[data-markdown\]"\)/);
 		assert.match(source, /checkbox\.className = "markdown-task-checkbox";/);
 		assert.match(source, /button\.className = "markdown-code-copy";/);
 		assert.match(source, /button\.setAttribute\("aria-label", "Copy code block"\);/);
@@ -678,6 +686,7 @@ suite('Webview HTML and nonce generation', () => {
 		const html = getChatWebviewHtml(extensionUri, webview);
 		assert.ok(html.includes('vscode-resource:'));
 		assert.ok(html.includes('chatWebview.base.css'));
+		assert.ok(html.includes('window.crustInitialSettings = {"allowRawHtml":false}'));
 		assert.ok(html.includes('generated/markdown-it.bundle.js'));
 		assert.ok(html.indexOf('generated/markdown-it.bundle.js') < html.indexOf('chatWebview.rendering.js'));
 		assert.ok(html.includes('chatWebview.main.js'));

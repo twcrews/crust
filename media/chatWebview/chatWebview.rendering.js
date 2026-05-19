@@ -266,6 +266,15 @@ function setMarkdownContent(element, markdown) {
 	renderMarkdown(element, markdown);
 }
 
+function setMarkdownSettings(settings) {
+	if (window.crustMarkdown && typeof window.crustMarkdown.setAllowRawHtml === "function") {
+		window.crustMarkdown.setAllowRawHtml(settings.allowRawHtml === true);
+	}
+	for (const element of Array.from(document.querySelectorAll("[data-markdown]"))) {
+		renderMarkdown(element, element.dataset.markdown ?? "");
+	}
+}
+
 function renderMarkdown(element, markdown) {
 	element.textContent = "";
 	if (!window.crustMarkdown || typeof window.crustMarkdown.render !== "function") {

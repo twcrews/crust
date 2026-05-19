@@ -43,6 +43,16 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Crust",
+      "properties": {
+        "crust.markdown.allowRawHtml": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Allow raw HTML in chat Markdown. When disabled, HTML is shown as text. When enabled, HTML is sanitized before rendering."
+        }
+      }
     }
   },
   "scripts": {

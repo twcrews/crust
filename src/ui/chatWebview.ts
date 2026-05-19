@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { getNonce } from '../utils/nonce';
 
-export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Webview): string {
+export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Webview, options: { allowRawHtml: boolean } = { allowRawHtml: false }): string {
 	const nonce = getNonce();
 	const htmlPath = join(extensionUri.fsPath, 'media', 'chatWebview.html');
 	const styleFiles = [
@@ -31,7 +31,8 @@ export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Web
 		'chatWebview.navigation.js',
 		'chatWebview.main.js',
 	];
-	const scriptTags = scriptFiles
+	const initialSettingsScript = `<script nonce="${nonce}">window.crustInitialSettings = ${JSON.stringify({ allowRawHtml: options.allowRawHtml })};</script>`;
+	const scriptTags = initialSettingsScript + '\n\t' + scriptFiles
 		.map((file) => {
 			const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'chatWebview', file));
 			return `<script nonce="${nonce}" src="${scriptUri}"></script>`;

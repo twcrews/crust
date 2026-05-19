@@ -18,6 +18,10 @@ import { dedupeSlashCommands, getBuiltinSlashCommands } from './slashCommands';
 import { StreamingEventRenderer } from './streamingEventRenderer';
 import { formatUsageStatus } from './usageStatus';
 
+function getAllowRawHtmlSetting(): boolean {
+	return vscode.workspace.getConfiguration('crust.markdown').get<boolean>('allowRawHtml', false);
+}
+
 export class CrustChatPanel implements vscode.Disposable {
 	private static readonly viewType = 'crustChat';
 	private readonly output = getCrustOutputChannel();
@@ -35,6 +39,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	private activeSessionPath: string | undefined;
 	private sessionWatcher: FSWatcher | undefined;
 	private sessionWatcherTimer: NodeJS.Timeout | undefined;
+	private allowRawHtml = getAllowRawHtmlSetting();
 
 	static show(context: vscode.ExtensionContext): void {
 		void CrustChatPanel.open(context);
@@ -74,7 +79,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.client = new PiRpcClient(this.cwd);
 		this.log('Creating chat panel', { cwd: this.cwd });
 		this.panel.iconPath = this.getIconPath();
-		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview);
+		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview, { allowRawHtml: this.allowRawHtml });
 
 		this.disposables.push(
 			this.panel.onDidDispose(() => this.dispose()),
@@ -90,6 +95,7 @@ export class CrustChatPanel implements vscode.Disposable {
 					this.postIdeContext();
 				}
 			}),
+			vscode.workspace.onDidChangeConfiguration((event) => this.handleConfigurationChange(event)),
 			this.client.onEvent((event) => this.handlePiEvent(event)),
 			this.client.onError((message) => this.handleClientError(message)),
 		);
@@ -107,6 +113,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private async initialize(): Promise<void> {
+		this.postMarkdownSettings();
 		this.postIdeContext();
 		try {
 			this.log('Initializing Pi RPC client');
@@ -724,6 +731,18 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 		this.conversationState.isProcessing = isProcessing;
 		this.post({ type: 'processing', processing: isProcessing });
+	}
+
+	private handleConfigurationChange(event: vscode.ConfigurationChangeEvent): void {
+		if (!event.affectsConfiguration('crust.markdown.allowRawHtml')) {
+			return;
+		}
+		this.allowRawHtml = getAllowRawHtmlSetting();
+		this.postMarkdownSettings();
+	}
+
+	private postMarkdownSettings(): void {
+		this.post({ type: 'markdownSettings', allowRawHtml: this.allowRawHtml });
 	}
 
 	private post(message: unknown): void {
