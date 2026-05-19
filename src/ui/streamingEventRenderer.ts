@@ -127,6 +127,7 @@ export class StreamingEventRenderer {
 		if (!isRenderableTool(event.toolName)) {
 			return;
 		}
+		this.startNewTextSegmentAfterNonTextContent();
 		const args = event.args ?? (event.toolCallId ? this.state.activeToolCallArgs.get(event.toolCallId) : undefined);
 		this.callbacks.post({ type: 'upsertTool', id: toolElementId(event.toolCallId), toolName: event.toolName, path: getToolHeaderDetail(event.toolName, args), status: 'running', body: getToolBody(event.toolName, args) });
 	}
@@ -135,6 +136,7 @@ export class StreamingEventRenderer {
 		if (!isRenderableTool(event.toolName) || event.toolName === 'read') {
 			return;
 		}
+		this.startNewTextSegmentAfterNonTextContent();
 		const args = event.args ?? (event.toolCallId ? this.state.activeToolCallArgs.get(event.toolCallId) : undefined);
 		this.callbacks.post({ type: 'upsertTool', id: toolElementId(event.toolCallId), toolName: event.toolName, path: getToolHeaderDetail(event.toolName, args), status: 'running', body: getToolResultText(event.partialResult) });
 	}
@@ -143,6 +145,7 @@ export class StreamingEventRenderer {
 		if (!isRenderableTool(event.toolName)) {
 			return;
 		}
+		this.startNewTextSegmentAfterNonTextContent();
 		const args = event.args ?? (event.toolCallId ? this.state.activeToolCallArgs.get(event.toolCallId) : undefined);
 		const diff = typeof event.result?.details?.diff === 'string' ? event.result.details.diff : undefined;
 		this.callbacks.post({ type: 'upsertTool', id: toolElementId(event.toolCallId), toolName: event.toolName, path: getToolHeaderDetail(event.toolName, args, event.isError ? undefined : event.result), status: event.isError ? 'error' : 'done', body: event.toolName === 'read' ? undefined : diff ?? getToolResultText(event.result) ?? getToolBody(event.toolName, args), isDiff: Boolean(diff) });
@@ -196,7 +199,12 @@ export class StreamingEventRenderer {
 			this.state.activeToolCallIds.delete(indexKey);
 		}
 		this.state.activeToolCallIds.set(toolKey, id);
+		this.startNewTextSegmentAfterNonTextContent();
 		this.callbacks.post({ type: 'upsertTool', id, toolName: toolCall.name, path: getToolHeaderDetail(toolCall.name, toolCall.args), status: assistantEvent.type === 'toolcall_end' ? 'pending' : 'drafting', body: getToolBody(toolCall.name, toolCall.args), isDiff: toolCall.name === 'edit' });
+	}
+
+	private startNewTextSegmentAfterNonTextContent(): void {
+		this.state.activeTextMessageIds.clear();
 	}
 
 	private extractToolCall(event: MessageUpdateEvent): { id?: string; name?: string; args?: unknown } {

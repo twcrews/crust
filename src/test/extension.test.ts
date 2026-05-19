@@ -284,6 +284,31 @@ suite('Streaming event renderer', () => {
 		assert.ok(posts.some((post) => (post as { type?: string }).type === 'refreshModel'));
 	});
 
+	test('streams text after tool use as a new chronological message segment', () => {
+		const { renderer, posts } = createRenderer();
+
+		renderer.handlePiEvent({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Before tool.', contentIndex: 0 } });
+		renderer.handlePiEvent({
+			type: 'message_update',
+			assistantMessageEvent: {
+				type: 'toolcall_end',
+				contentIndex: 1,
+				toolCall: { id: 'call-1', name: 'bash', arguments: { command: 'echo hi' } },
+			},
+		});
+		renderer.handlePiEvent({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'After tool.', contentIndex: 0 } });
+
+		const addMessages = posts.filter((post) => (post as { type?: string }).type === 'addMessage');
+		const appendMessages = posts.filter((post) => (post as { type?: string }).type === 'appendMessage');
+		const toolIndex = posts.findIndex((post) => (post as { type?: string }).type === 'upsertTool');
+		const secondAddIndex = posts.findIndex((post) => (post as { type?: string; id?: string }).type === 'addMessage' && (post as { id?: string }).id === (appendMessages[1] as { id?: string }).id);
+
+		assert.strictEqual(addMessages.length, 2);
+		assert.notStrictEqual((appendMessages[0] as { id?: string }).id, (appendMessages[1] as { id?: string }).id);
+		assert.ok(toolIndex >= 0);
+		assert.ok(secondAddIndex > toolIndex);
+	});
+
 	test('renders abort indicators and clears streaming state on agent end', () => {
 		const { renderer, state, posts, processing } = createRenderer();
 		state.activeToolCallIds.set('id:old', 'tool-old');
