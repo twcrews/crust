@@ -236,7 +236,7 @@ function handleSlashAutocompleteKeydown(event) {
 		renderSlashAutocomplete();
 		return true;
 	}
-	if (event.key === "Tab" || (autocompleteMode === "slash" && event.key === "Enter" && prompt.value.trim() !== slashSuggestions[activeSlashSuggestionIndex]?.command)) {
+	if (event.key === "Tab" || (event.key === "Enter" && (autocompleteMode === "path" || (autocompleteMode === "slash" && prompt.value.trim() !== slashSuggestions[activeSlashSuggestionIndex]?.command)))) {
 		event.preventDefault();
 		selectSlashSuggestion(activeSlashSuggestionIndex);
 		return true;

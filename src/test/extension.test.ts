@@ -604,6 +604,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.deepStrictEqual(api.getSlashCommandSuggestions('/he').map(({ command, description, disabled }) => ({ command, description, disabled })), [
 			{ command: '/help', description: 'not supported yet', disabled: true },
 		]);
+		assert.match(source, /event\.key === "Enter"[\s\S]*autocompleteMode === "path"/);
 		assert.strictEqual(api.runSlashCommand('/help'), true);
 		assert.deepStrictEqual(statusMessages.at(-1), { message: '/help is not supported yet', error: true });
 	});
