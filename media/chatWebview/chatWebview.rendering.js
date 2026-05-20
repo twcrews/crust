@@ -551,7 +551,7 @@ function renderToolBody(body, text, isDiff) {
 	}
 }
 
-const PROJECT_FILE_REFERENCE_PATTERN = /(^|[^A-Za-z0-9@:/._-])(@?(?:(?:\/|~\/)(?:[A-Za-z0-9._@%+=,;~()-]+\/)+[A-Za-z0-9._@%+=,;~()-]+|(?:\.{1,2}\/)?(?:[A-Za-z0-9._-]+\/)+(?:[A-Za-z0-9._@%+=,;~() -]+\.[A-Za-z0-9]{1,8}|\.[A-Za-z0-9][A-Za-z0-9._-]*)|[A-Za-z0-9._-]+\.[A-Za-z0-9]{1,8}|\.[A-Za-z0-9][A-Za-z0-9._-]*)(?:[:#](?:L)?\d+(?::\d+)?)?)(?![A-Za-z0-9._/-])/g;
+const PROJECT_FILE_REFERENCE_PATTERN = /(^|[^A-Za-z0-9@:/._\[\]-])(@?(?:(?:\/|~\/)(?:[A-Za-z0-9._@%+=,;~()\[\]-]+\/)+[A-Za-z0-9._@%+=,;~()\[\]-]+|(?:\.{1,2}\/)?(?:[A-Za-z0-9._\[\]-]+\/)+(?:[A-Za-z0-9._@%+=,;~() \[\]-]+\.[A-Za-z0-9]{1,8}|\.[A-Za-z0-9][A-Za-z0-9._\[\]-]*)|[A-Za-z0-9._\[\]-]+\.[A-Za-z0-9]{1,8}|\.[A-Za-z0-9][A-Za-z0-9._\[\]-]*)(?:[:#](?:L)?\d+(?::\d+)?)?)(?![A-Za-z0-9._/\[\]-])/g;
 const PROJECT_FILE_TRAILING_PUNCTUATION = /[),.;!?]+$/;
 
 function setProjectFiles(files, roots) {
