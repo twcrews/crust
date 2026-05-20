@@ -4,6 +4,15 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.9.0] - 2026-05-20
+
+- Added a Crust activity-bar session explorer for browsing, refreshing, opening, and starting Pi sessions.
+- Added an optional terminal view that runs Pi's native TUI in a VS Code terminal editor with Crust IDE context injection and session restoration.
+- Added session quick-pick/restore commands and default routing between the webview and terminal view.
+- Added extension screenshot branding and refreshed session explorer, scrollbar, and navigation styling.
+- Expanded tests for session history, terminal-view wiring, session explorer integration, and current contributed commands/settings.
+- Updated agent guidance for the current session explorer and terminal view architecture.
+
 ## [0.8.1] - 2026-05-20
 
 - Fixed Markdown-rendered file references so user prompt links resolve to Crust project file links when the referenced file exists.
@@ -99,6 +108,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.9.0]: https://github.com/twcrews/crust/compare/0.8.1...0.9.0
 [0.8.1]: https://github.com/twcrews/crust/compare/0.8.0...0.8.1
 [0.8.0]: https://github.com/twcrews/crust/compare/0.7.0...0.8.0
 [0.7.0]: https://github.com/twcrews/crust/compare/0.6.2...0.7.0
