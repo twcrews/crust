@@ -839,7 +839,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(mainSource, /function focusPrompt\(\) \{\s*prompt\.focus\(\);\s*\}/);
 		assert.match(mainSource, /window\.setTimeout\(focusPrompt, 0\);[\s\S]*window\.setTimeout\(focusPrompt, 50\);/);
 		assert.match(mainSource, /focusPromptSoon\(\);[\s\S]*case "focusPrompt":\s*focusPromptSoon\(\);/);
-		assert.match(panelSource, /const chatPanel = new CrustChatPanel\(context, panel\);[\s\S]*chatPanel\.focusPrompt\(\);/);
+		assert.match(panelSource, /const chatPanel = new CrustChatPanel\(context, panel, sessionPath, startNewSession\);[\s\S]*chatPanel\.focusPrompt\(\);/);
 		assert.doesNotMatch(panelSource, /currentPanel/);
 		assert.match(panelSource, /private focusPrompt\(\): void \{\s*this\.post\(\{ type: 'focusPrompt' \}\);\s*\}/);
 	});
