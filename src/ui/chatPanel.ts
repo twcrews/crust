@@ -445,7 +445,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				return;
 			}
 			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(target.filePath));
-			const editor = await vscode.window.showTextDocument(document, { preview: false });
+			const editor = await vscode.window.showTextDocument(document, { preview: true });
 			if (target.line !== undefined) {
 				const line = Math.min(Math.max(target.line - 1, 0), Math.max(document.lineCount - 1, 0));
 				const character = Math.max((target.column ?? 1) - 1, 0);

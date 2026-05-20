@@ -135,7 +135,9 @@
 	height: 26px;
 	padding: 0;
 	color: var(--vscode-icon-foreground);
-	background: var(--vscode-button-secondaryBackground, var(--vscode-editor-background));
+	background:
+		linear-gradient(var(--vscode-button-secondaryBackground, transparent), var(--vscode-button-secondaryBackground, transparent)),
+		var(--vscode-editorWidget-background, var(--vscode-editor-background, #1e1e1e));
 	border: 1px solid var(--vscode-button-border, var(--vscode-sideBar-border));
 	border-radius: 4px;
 	opacity: 0;
@@ -149,7 +151,9 @@
 }
 .markdown-code-copy:hover,
 .markdown-code-copy:focus-visible {
-	background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
+	background:
+		linear-gradient(var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground, transparent)), var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground, transparent))),
+		var(--vscode-editorWidget-background, var(--vscode-editor-background, #1e1e1e));
 }
 .markdown-code-copy.copied {
 	color: var(--vscode-testing-iconPassed, var(--vscode-charts-green));

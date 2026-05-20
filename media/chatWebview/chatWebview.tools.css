@@ -103,12 +103,20 @@
 .tool-card.error .tool-header {
 	color: var(--vscode-errorForeground);
 }
+.tool-body-wrapper {
+	position: relative;
+}
+.tool-body-wrapper:hover .markdown-code-copy,
+.tool-body-wrapper .markdown-code-copy:focus-visible,
+.tool-body-wrapper .markdown-code-copy.copied {
+	opacity: 1;
+}
 .tool-body {
 	box-sizing: border-box;
 	max-width: 100%;
 	max-height: 360px;
 	margin: 0;
-	padding: 10px;
+	padding: 10px 42px 10px 10px;
 	overflow: auto;
 	white-space: pre;
 	font-family: var(--vscode-editor-font-family, monospace);

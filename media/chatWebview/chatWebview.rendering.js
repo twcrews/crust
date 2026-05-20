@@ -470,9 +470,14 @@ function upsertTool(message) {
 		header.className = "tool-header";
 		element.append(header);
 
+		const bodyWrapper = document.createElement("div");
+		bodyWrapper.className = "tool-body-wrapper";
+		element.append(bodyWrapper);
+
 		const body = document.createElement("pre");
 		body.className = "tool-body";
-		element.append(body);
+		bodyWrapper.append(body);
+		bodyWrapper.append(createToolOutputCopyButton(body));
 		appendConversationElement(element, false);
 		updateEmptyState();
 	}
@@ -481,6 +486,7 @@ function upsertTool(message) {
 	element.className = "tool-card " + (message.status ?? "");
 	element.classList.toggle("no-body", !hasBody);
 	const header = element.querySelector(".tool-header");
+	const bodyWrapper = element.querySelector(".tool-body-wrapper");
 	const body = element.querySelector(".tool-body");
 	const path = message.path ? " " + message.path : "";
 	const headerText = (message.toolName ?? "tool") + path + formatToolStatus(message.status);
@@ -492,10 +498,31 @@ function upsertTool(message) {
 	appendProjectFileLinkedText(header, path + formatToolStatus(message.status));
 	header.title = headerText;
 	renderToolBody(body, message.body ?? "", Boolean(message.isDiff),);
-	body.hidden = !hasBody;
+	bodyWrapper.hidden = !hasBody;
 	body.classList.toggle("diff", Boolean(message.isDiff));
 	keepLoadingAtBottom();
 	finishContentUpdate();
+}
+
+function createToolOutputCopyButton(body) {
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "markdown-code-copy tool-body-copy";
+	button.setAttribute("aria-label", "Copy tool output");
+	button.title = "Copy tool output";
+	button.append(createCopyIcon());
+	button.addEventListener("click", async () => {
+		const copied = await copyTextToClipboard(body.textContent ?? "");
+		button.classList.toggle("copied", copied);
+		button.setAttribute("aria-label", copied ? "Copied tool output" : "Copy tool output");
+		button.title = copied ? "Copied" : "Copy tool output";
+		window.setTimeout(() => {
+			button.classList.remove("copied");
+			button.setAttribute("aria-label", "Copy tool output");
+			button.title = "Copy tool output";
+		}, 1400);
+	});
+	return button;
 }
 
 function renderToolBody(body, text, isDiff) {
