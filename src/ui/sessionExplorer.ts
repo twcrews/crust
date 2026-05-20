@@ -4,7 +4,7 @@ import { errorMessage } from '../utils/errorMessage';
 import { getNonce } from '../utils/nonce';
 import type { SessionInfo } from './chatTypes';
 import { formatSessionDate, getInitialCwd, truncate } from './chatPanelUtils';
-import { listSessionsForCwd } from './sessionHistory';
+import { getSessionDirectoryForCwd, listSessionsForCwd } from './sessionHistory';
 import { CrustChatPanel } from './chatPanel';
 import { CrustTerminalView, getUseTerminalViewByDefaultSetting } from './terminalView';
 
@@ -20,12 +20,30 @@ function escapeHtml(value: string): string {
 	}[character] ?? character));
 }
 
+function renderInlineMarkdown(value: string): string {
+	return value.split(/(`+[^`]*`+)/g).map((segment) => {
+		const codeMatch = segment.match(/^(`+)([^`]*?)\1$/);
+		if (codeMatch) {
+			return `<code>${escapeHtml(codeMatch[2])}</code>`;
+		}
+		return escapeHtml(segment)
+			.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>')
+			.replace(/__([^_]+?)__/g, '<strong>$1</strong>')
+			.replace(/\*([^*]+?)\*/g, '<em>$1</em>')
+			.replace(/_([^_]+?)_/g, '<em>$1</em>')
+			.replace(/~~([^~]+?)~~/g, '<s>$1</s>');
+	}).join('');
+}
+
 export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.Disposable {
 	private readonly output = getCrustOutputChannel();
 	private readonly disposables: vscode.Disposable[] = [];
 	private sessions: SessionInfo[] = [];
 	private loading = false;
 	private view: vscode.WebviewView | undefined;
+	private sessionDirectoryWatcher: vscode.FileSystemWatcher | undefined;
+	private refreshTimer: NodeJS.Timeout | undefined;
+	private watchedSessionDirectory: string | undefined;
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -35,15 +53,22 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 			provider,
 			vscode.window.registerWebviewViewProvider('crust.sessions', provider, { webviewOptions: { retainContextWhenHidden: true } }),
 			vscode.workspace.onDidChangeWorkspaceFolders(() => provider.refresh()),
-			CrustChatPanel.onDidChangeOpenSessions(() => provider.render()),
-			CrustTerminalView.onDidChangeOpenSessions(() => provider.render()),
+			CrustChatPanel.onDidChangeOpenSessions(() => provider.scheduleRefresh()),
+			CrustTerminalView.onDidChangeOpenSessions(() => provider.scheduleRefresh()),
 			vscode.commands.registerCommand('crust.sessions.refresh', () => provider.refresh()),
+			vscode.commands.registerCommand('crust.sessions.new', () => provider.newSession()),
 			vscode.commands.registerCommand('crust.sessions.open', (session?: SessionInfo) => provider.openSession(session)),
 			vscode.commands.registerCommand('crust.restoreSession', () => provider.showSessionQuickPick()),
 		);
 	}
 
 	dispose(): void {
+		if (this.refreshTimer) {
+			clearTimeout(this.refreshTimer);
+			this.refreshTimer = undefined;
+		}
+		this.sessionDirectoryWatcher?.dispose();
+		this.sessionDirectoryWatcher = undefined;
 		while (this.disposables.length) {
 			this.disposables.pop()?.dispose();
 		}
@@ -91,7 +116,27 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 		}
 	}
 
+	async newSession(): Promise<void> {
+		if (getUseTerminalViewByDefaultSetting()) {
+			await CrustTerminalView.show(this.context);
+		} else {
+			await CrustChatPanel.newSession(this.context);
+		}
+		void this.refresh();
+	}
+
+	scheduleRefresh(delay = 250): void {
+		if (this.refreshTimer) {
+			clearTimeout(this.refreshTimer);
+		}
+		this.refreshTimer = setTimeout(() => {
+			this.refreshTimer = undefined;
+			void this.refresh();
+		}, delay);
+	}
+
 	async refresh(): Promise<void> {
+		this.watchSessionDirectory();
 		this.loading = true;
 		this.render();
 		try {
@@ -103,6 +148,26 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 			this.loading = false;
 			this.render();
 		}
+	}
+
+	private watchSessionDirectory(): void {
+		const sessionDirectory = getSessionDirectoryForCwd(getInitialCwd());
+		if (this.watchedSessionDirectory === sessionDirectory) {
+			return;
+		}
+		this.sessionDirectoryWatcher?.dispose();
+		this.sessionDirectoryWatcher = undefined;
+		this.watchedSessionDirectory = sessionDirectory;
+		if (!sessionDirectory) {
+			return;
+		}
+		const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(sessionDirectory, '*.jsonl'));
+		this.sessionDirectoryWatcher = watcher;
+		this.disposables.push(
+			watcher.onDidCreate(() => this.scheduleRefresh()),
+			watcher.onDidChange(() => this.scheduleRefresh()),
+			watcher.onDidDelete(() => this.scheduleRefresh()),
+		);
 	}
 
 	private handleMessage(message: unknown): void {
@@ -157,6 +222,9 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 		.session:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 		.title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		.date { margin-top: 2px; color: var(--vscode-descriptionForeground); font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.title code { padding: 0 2px; border-radius: 3px; background: var(--vscode-textCodeBlock-background); font-family: var(--vscode-editor-font-family); font-size: 0.95em; }
+		.title strong { font-weight: 600; }
+		.title em { font-style: italic; }
 	</style>
 </head>
 <body>
@@ -183,7 +251,8 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 			const title = session.name || truncate(session.firstMessage, 80);
 			const tooltip = [title, session.firstMessage, `${session.messageCount} messages`, session.path].filter(Boolean).join('\n');
 			const className = openSessionPaths.has(session.path) ? 'session open' : 'session';
-			return `<button type="button" class="${className}" data-path="${escapeHtml(session.path)}" title="${escapeHtml(tooltip)}"><div class="title">${escapeHtml(title)}</div><div class="date">${escapeHtml(formatSessionDate(session.modified))}</div></button>`;
+			const messageLabel = `${session.messageCount} ${session.messageCount === 1 ? 'message' : 'messages'}`;
+			return `<button type="button" class="${className}" data-path="${escapeHtml(session.path)}" title="${escapeHtml(tooltip)}"><div class="title">${renderInlineMarkdown(title)}</div><div class="date">${escapeHtml(formatSessionDate(session.modified))} · ${escapeHtml(messageLabel)}</div></button>`;
 		}).join('');
 	}
 

@@ -15,8 +15,17 @@ export async function listSessions(client: SessionStateClient, cwd: string | und
 }
 
 export async function listSessionsForCwd(cwd: string | undefined): Promise<SessionInfo[]> {
-	const sessionDir = getDefaultSessionDir(cwd);
+	const sessionDir = getSessionDirectoryForCwd(cwd);
 	return listSessionsFromDirectory(sessionDir);
+}
+
+export function getSessionDirectoryForCwd(cwd: string | undefined): string | undefined {
+	const workspaceCwd = cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+	if (!workspaceCwd) {
+		return undefined;
+	}
+	const root = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions');
+	return join(root, `--${workspaceCwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`);
 }
 
 async function listSessionsFromDirectory(sessionDir: string | undefined): Promise<SessionInfo[]> {
@@ -43,16 +52,7 @@ async function getSessionDir(client: SessionStateClient, cwd: string | undefined
 	if (sessionFile) {
 		return dirname(sessionFile);
 	}
-	return getDefaultSessionDir(cwd);
-}
-
-function getDefaultSessionDir(cwd: string | undefined): string | undefined {
-	const workspaceCwd = cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-	if (!workspaceCwd) {
-		return undefined;
-	}
-	const root = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions');
-	return join(root, `--${workspaceCwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`);
+	return getSessionDirectoryForCwd(cwd);
 }
 
 async function readSessionInfo(path: string): Promise<SessionInfo | undefined> {

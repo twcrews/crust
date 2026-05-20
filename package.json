@@ -21,6 +21,7 @@
     "onCommand:crust.openChatDefault",
     "onCommand:crust.restoreSession",
     "onCommand:crust.sessions.refresh",
+    "onCommand:crust.sessions.new",
     "onCommand:crust.sessions.open",
     "onView:crust.sessions",
     "onWebviewPanel:crustChat"
@@ -65,6 +66,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "crust.sessions.new",
+        "title": "Crust: New Session",
+        "icon": "$(add)"
+      },
+      {
         "command": "crust.sessions.open",
         "title": "Crust: Open Session"
       }
@@ -86,7 +92,12 @@
         {
           "command": "crust.sessions.refresh",
           "when": "view == crust.sessions",
-          "group": "navigation"
+          "group": "navigation@0"
+        },
+        {
+          "command": "crust.sessions.new",
+          "when": "view == crust.sessions",
+          "group": "navigation@1"
         }
       ],
       "editor/title": [

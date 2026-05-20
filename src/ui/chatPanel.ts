@@ -168,6 +168,17 @@ export class CrustChatPanel implements vscode.Disposable {
 		void CrustChatPanel.open(context);
 	}
 
+	static async newSession(context: vscode.ExtensionContext): Promise<void> {
+		const panel = this.lastFocusedPanel ?? this.openPanels.values().next().value as CrustChatPanel | undefined;
+		if (panel) {
+			panel.panel.reveal(panel.panel.viewColumn ?? vscode.ViewColumn.Beside);
+			await panel.newChat();
+			panel.focusPrompt();
+			return;
+		}
+		await CrustChatPanel.open(context, undefined, true);
+	}
+
 	static hasOpenPanel(): boolean {
 		return this.openPanels.size > 0;
 	}
@@ -207,7 +218,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		});
 	}
 
-	private static async open(context: vscode.ExtensionContext, sessionPath?: string): Promise<void> {
+	private static async open(context: vscode.ExtensionContext, sessionPath?: string, startNewSession = false): Promise<void> {
 		const panel = vscode.window.createWebviewPanel(
 			CrustChatPanel.viewType,
 			'Crust Chat',
@@ -215,7 +226,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			{ enableScripts: true, retainContextWhenHidden: true },
 		);
 
-		const chatPanel = new CrustChatPanel(context, panel, sessionPath);
+		const chatPanel = new CrustChatPanel(context, panel, sessionPath, startNewSession);
 		if (getLockEditorGroupOnOpenSetting()) {
 			await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
 		}
@@ -226,6 +237,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		private readonly context: vscode.ExtensionContext,
 		private readonly panel: vscode.WebviewPanel,
 		private readonly restoredSessionPath?: string,
+		private readonly startNewSession = false,
 	) {
 		this.cwd = getInitialCwd();
 		this.client = new PiRpcClient(this.cwd, getPiCommandPathSetting());
@@ -300,6 +312,11 @@ export class CrustChatPanel implements vscode.Disposable {
 					}
 				} catch (error) {
 					this.log('Failed to switch to restored webview session', { error: errorMessage(error), path: this.restoredSessionPath }, 'warn');
+				}
+			} else if (this.startNewSession) {
+				this.log('Starting new session during chat panel initialization');
+				if (await this.client.newSession()) {
+					state = await this.client.getState();
 				}
 			}
 			const messages = await this.client.getMessages();
