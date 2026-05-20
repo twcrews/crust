@@ -764,6 +764,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.strictEqual(properties?.['crust.markdown.allowRawHtml']?.default, false);
 		assert.strictEqual(properties?.['crust.pi.commandPath']?.default, 'pi');
 		assert.strictEqual(properties?.['crust.chat.includeIdeContextByDefault']?.default, false);
+		assert.strictEqual(properties?.['crust.chat.useTerminalView']?.default, false);
 		assert.strictEqual(properties?.['crust.chat.lockEditorGroupOnOpen']?.default, true);
 		assert.strictEqual(properties?.['crust.pi.defaultModel']?.default, '');
 		assert.strictEqual(properties?.['crust.session.restoreOnReload']?.default, true);
@@ -777,6 +778,7 @@ suite('Webview HTML and nonce generation', () => {
 		const stateSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.state.js'), 'utf8');
 		const renderingSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
 
+		assert.ok(packageJson.activationEvents?.includes('onStartupFinished'));
 		assert.ok(packageJson.activationEvents?.includes('onWebviewPanel:crustChat'));
 		assert.match(extensionSource, /CrustChatPanel\.registerSerializer\(context\)/);
 		assert.match(panelSource, /registerWebviewPanelSerializer\(CrustChatPanel\.viewType/);

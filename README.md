@@ -12,6 +12,7 @@ The goal of Crust is to offer feature parity with existing similar extensions (l
 - **File autocomplete with `@`** — reference workspace files in your prompt without leaving the chat
 - **Rich markdown rendering** — responses render with full markdown: headings, tables, code blocks, and more
 - **Rich diff snippets** — code changes are shown as inline diffs so you can review edits at a glance
+- **Optional terminal view** — opt in to opening Pi's native TUI in a VS Code terminal editor tab with Crust-provided IDE context injection
 
 ### Planned Features
 
@@ -37,6 +38,7 @@ Crust contributes VS Code settings under **Extensions › Crust**:
 - `crust.pi.defaultModel` — preferred model key selected on startup. Leave empty to use Pi's current model.
 - `crust.chat.lockEditorGroupOnOpen` — lock the chat editor group after opening Crust. Defaults to `true`.
 - `crust.chat.includeIdeContextByDefault` — enable current editor file/selection context for new prompts by default. Defaults to `false` for security/privacy so Crust does not send IDE context unless you explicitly enable it in the chat UI or settings.
+- `crust.chat.useTerminalView` — open `Crust: Open Chat` as a VS Code terminal editor running Pi's native TUI instead of the Crust webview. Defaults to `false`. In terminal mode, `crust.chat.includeIdeContextByDefault` controls whether Crust IDE context starts enabled; toggle it in the TUI with `/ide-context`. Terminal sessions are restored after VS Code reloads when `crust.session.restoreOnReload` is enabled.
 - `crust.session.restoreOnReload` — restore serialized Crust chat tabs to their previous Pi session after a VS Code window reload. Defaults to `true`.
 - `crust.markdown.allowRawHtml` — allow sanitized raw HTML in rendered chat Markdown. Defaults to `false`.
 

@@ -15,6 +15,7 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:crust.openChat",
     "onWebviewPanel:crustChat"
   ],
@@ -61,6 +62,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Enable current editor file/selection context for new prompts by default. Disabled by default to avoid sending IDE context unless explicitly enabled."
+        },
+        "crust.chat.useTerminalView": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Open Crust as a VS Code terminal editor running Pi's native TUI instead of the Crust webview. When enabled, Crust injects current editor context into Pi turns via a bundled Pi extension."
         },
         "crust.chat.lockEditorGroupOnOpen": {
           "type": "boolean",
