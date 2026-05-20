@@ -10,14 +10,16 @@
 	margin-right: auto;
 	padding: 0 var(--chat-horizontal-padding) 12px;
 	background: transparent;
+	pointer-events: none;
 }
 .controls::before {
 	content: '';
 	position: absolute;
-	inset: 0 auto 0 50%;
+	top: 0;
+	bottom: 0;
+	left: calc(50% - 50vw);
 	z-index: -1;
-	width: 100vw;
-	transform: translateX(-50%);
+	width: calc(100vw - var(--chat-scrollbar-reserved-space));
 	pointer-events: none;
 	background: linear-gradient(
 		to bottom,
@@ -25,6 +27,9 @@
 		var(--vscode-sideBar-background),
 		var(--vscode-sideBar-background)
 	);
+}
+.controls > * {
+	pointer-events: auto;
 }
 .input-row {
 	display: flex;

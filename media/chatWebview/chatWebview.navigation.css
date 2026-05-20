@@ -1,12 +1,12 @@
 .conversation-nav {
 	position: fixed;
 	top: 50%;
-	right: 8px;
+	right: calc(8px + var(--chat-scrollbar-reserved-space));
 	z-index: 10;
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
-	padding: 4px;
+	gap: 2px;
+	padding: 0;
 	transform: translateY(-50%);
 }
 .conversation-nav-item {

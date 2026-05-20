@@ -3,6 +3,7 @@
 	scroll-behavior: smooth;
 	--chat-horizontal-padding: clamp(24px, 5vw, 56px);
 	--controls-overlay-space: 120px;
+	--chat-scrollbar-reserved-space: 16px;
 }
 body {
 	margin: 0;
