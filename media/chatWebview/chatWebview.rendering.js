@@ -305,6 +305,7 @@ function enhanceRenderedMarkdown(element) {
 	wrapCodeBlocks(element);
 	wrapTables(element);
 	hardenLinks(element);
+	convertRenderedFileReferenceLinks(element);
 	linkifyProjectFileReferences(element);
 }
 
@@ -592,6 +593,17 @@ function rerenderFileReferenceContent() {
 	}
 	for (const element of Array.from(document.querySelectorAll(".message-context span, .tool-header"))) {
 		linkifyProjectFileReferences(element);
+	}
+}
+
+function convertRenderedFileReferenceLinks(element) {
+	for (const link of Array.from(element.querySelectorAll("a[href]"))) {
+		const reference = link.textContent?.trim() ?? "";
+		if (!reference || !isExistingFileReference(reference)) {
+			queueFileReferenceValidation(reference);
+			continue;
+		}
+		link.replaceWith(createProjectFileLink(reference));
 	}
 }
 
