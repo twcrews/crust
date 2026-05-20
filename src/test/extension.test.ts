@@ -806,7 +806,8 @@ suite('Webview HTML and nonce generation', () => {
 		const css = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.markdown.css'), 'utf8');
 
 		assert.match(source, /element\.innerHTML = window\.crustMarkdown\.render\(markdown\);/);
-		assert.match(source, /function enhanceRenderedMarkdown\(element\)[\s\S]*enhanceTaskListItems\(element\);[\s\S]*wrapCodeBlocks\(element\);[\s\S]*wrapTables\(element\);[\s\S]*hardenLinks\(element\);/);
+		assert.match(source, /function enhanceRenderedMarkdown\(element\)[\s\S]*enhanceTaskListItems\(element\);[\s\S]*wrapCodeBlocks\(element\);[\s\S]*wrapTables\(element\);[\s\S]*hardenLinks\(element\);[\s\S]*convertRenderedFileReferenceLinks\(element\);[\s\S]*linkifyProjectFileReferences\(element\);/);
+		assert.match(source, /function convertRenderedFileReferenceLinks\(element\)[\s\S]*querySelectorAll\("a\[href\]"\)[\s\S]*isExistingFileReference\(reference\)[\s\S]*queueFileReferenceValidation\(reference\)[\s\S]*link\.replaceWith\(createProjectFileLink\(reference\)\);/);
 		assert.match(source, /function setMarkdownSettings\(settings\)[\s\S]*setAllowRawHtml\(settings\.allowRawHtml === true\)[\s\S]*querySelectorAll\("\[data-markdown\]"\)/);
 		assert.match(source, /function setChatSettings\(settings\)[\s\S]*includeIdeContextByDefault = settings\.includeIdeContextByDefault === true/);
 		assert.match(source, /checkbox\.className = "markdown-task-checkbox";/);
@@ -819,6 +820,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(source, /function isSafeMarkdownUrl\(href\)[\s\S]*url\.protocol === "http:"[\s\S]*url\.protocol === "https:"[\s\S]*url\.protocol === "mailto:"/);
 		assert.match(css, /\.markdown-code-block \{[\s\S]*position: relative;/);
 		assert.match(css, /\.markdown-code-copy\.copied \{[\s\S]*var\(--vscode-testing-iconPassed/);
+		assert.match(css, /\.message\.user a \{[\s\S]*color: var\(--vscode-button-foreground\);[\s\S]*text-decoration: underline;/);
 	});
 
 	test('injects nonce, CSP source, styles, scripts, and icon into the chat webview template', () => {
