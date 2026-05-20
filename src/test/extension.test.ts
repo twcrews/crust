@@ -14,7 +14,7 @@ import { restoreSessionMessages } from '../ui/sessionRestoreRenderer';
 import { getBuiltinSlashCommands, getPiChangelogMarkdown, markUnsupportedBuiltinSlashCommands, orderSlashCommands } from '../ui/slashCommands';
 import { StreamingEventRenderer } from '../ui/streamingEventRenderer';
 import { getPathSuggestions } from '../ui/pathAutocomplete';
-import { listSessions } from '../ui/sessionHistory';
+import { getSessionDirectoryForCwd, listSessions, listSessionsForCwd } from '../ui/sessionHistory';
 import { getChatWebviewHtml } from '../ui/chatWebview';
 import { parseWebviewMessage } from '../ui/chatTypes';
 import { getToolBody, getToolHeaderDetail, getToolPath, getToolResultText, isFileTool, isRenderableTool } from '../ui/toolUtils';
@@ -637,6 +637,21 @@ suite('Session history', () => {
 		assert.strictEqual(sessions[1].firstMessage, 'Older question');
 	});
 
+	test('lists sessions directly for a workspace cwd', async () => {
+		const directory = getSessionDirectoryForCwd(cwd);
+		assert.ok(directory);
+		await mkdir(directory, { recursive: true });
+		await writeFile(join(directory, 'direct.jsonl'), [
+			JSON.stringify({ type: 'session' }),
+			JSON.stringify({ type: 'message', message: { role: 'user', content: 'Direct session' } }),
+		].join('\n'));
+
+		const sessions = await listSessionsForCwd(cwd);
+		assert.strictEqual(sessions.length, 1);
+		assert.strictEqual(sessions[0].firstMessage, 'Direct session');
+		assert.strictEqual(sessions[0].messageCount, 1);
+	});
+
 	test('uses sessionFile from Pi state when available', async () => {
 		const directory = await mkdtemp(join(tmpdir(), 'crust-state-sessions-'));
 		try {
@@ -771,7 +786,7 @@ suite('Webview HTML and nonce generation', () => {
 	});
 
 	test('supports restoring persisted webview sessions after VS Code reloads', async () => {
-		const packageJson = JSON.parse(await readFile(resolve(__dirname, '..', '..', 'package.json'), 'utf8')) as { activationEvents?: string[] };
+		const packageJson = JSON.parse(await readFile(resolve(__dirname, '..', '..', 'package.json'), 'utf8')) as { activationEvents?: string[]; contributes?: { commands?: Array<{ command?: string }>; views?: Record<string, Array<{ id?: string }>> } };
 		const extensionSource = await readFile(resolve(__dirname, '..', '..', 'src', 'extension.ts'), 'utf8');
 		const panelSource = await readFile(resolve(__dirname, '..', '..', 'src', 'ui', 'chatPanel.ts'), 'utf8');
 		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
@@ -779,7 +794,14 @@ suite('Webview HTML and nonce generation', () => {
 		const renderingSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
 
 		assert.ok(packageJson.activationEvents?.includes('onStartupFinished'));
+		assert.ok(packageJson.activationEvents?.includes('onCommand:crust.openChatTerminal'));
+		assert.ok(packageJson.activationEvents?.includes('onView:crust.sessions'));
 		assert.ok(packageJson.activationEvents?.includes('onWebviewPanel:crustChat'));
+		assert.ok(packageJson.contributes?.commands?.some((command) => command.command === 'crust.restoreSession'));
+		assert.ok(packageJson.contributes?.views?.crust?.some((view) => view.id === 'crust.sessions'));
+		assert.match(extensionSource, /CrustTerminalView\.register\(context\)/);
+		assert.match(extensionSource, /CrustSessionExplorer\.register\(context\)/);
+		assert.match(extensionSource, /crust\.openChatDefault[\s\S]*getUseTerminalViewByDefaultSetting\(\) \? CrustTerminalView\.show\(context\) : CrustChatPanel\.show\(context\)/);
 		assert.match(extensionSource, /CrustChatPanel\.registerSerializer\(context\)/);
 		assert.match(panelSource, /registerWebviewPanelSerializer\(CrustChatPanel\.viewType/);
 		assert.match(panelSource, /deserializeWebviewPanel: async \(panel, state(?:: unknown)?\) => \{[\s\S]*const shouldRestoreSession = getRestoreOnReloadSetting\(\);[\s\S]*new CrustChatPanel\(context, panel, sessionPath\);/);
@@ -789,6 +811,25 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(stateSource, /let persistedWebviewState = vscode\.getState\(\) \|\| \{\};/);
 		assert.match(stateSource, /vscode\.setState\(persistedWebviewState\);/);
 		assert.match(renderingSource, /updatePersistedWebviewState\(\{ sessionTitle: title \}\);/);
+	});
+
+	test('wires terminal view and session explorer integration points', async () => {
+		const terminalSource = await readFile(resolve(__dirname, '..', '..', 'src', 'ui', 'terminalView.ts'), 'utf8');
+		const explorerSource = await readFile(resolve(__dirname, '..', '..', 'src', 'ui', 'sessionExplorer.ts'), 'utf8');
+		const contextExtensionSource = await readFile(resolve(__dirname, '..', '..', 'resources', 'pi', 'crust-vscode-context.js'), 'utf8');
+
+		assert.match(terminalSource, /CRUST_IDE_CONTEXT_FILE/);
+		assert.match(terminalSource, /CRUST_TERMINAL_ID/);
+		assert.match(terminalSource, /CRUST_BRIDGE_URL/);
+		assert.match(terminalSource, /'--extension',[\s\S]*crust-vscode-context\.js/);
+		assert.match(terminalSource, /static async restore\(context: vscode\.ExtensionContext\)/);
+		assert.match(terminalSource, /workspaceState\.get<TerminalSessionMap>\(terminalSessionsKey/);
+		assert.match(contextExtensionSource, /CRUST_IDE_CONTEXT_ENABLED/);
+		assert.match(contextExtensionSource, /CRUST_BRIDGE_URL/);
+		assert.match(explorerSource, /registerWebviewViewProvider\('crust\.sessions'/);
+		assert.match(explorerSource, /listSessionsForCwd\(getInitialCwd\(\)\)/);
+		assert.match(explorerSource, /CrustTerminalView\.focusSession\(session\.path\)/);
+		assert.match(explorerSource, /getUseTerminalViewByDefaultSetting\(\)/);
 	});
 
 	test('focuses the prompt when the chat opens', async () => {
