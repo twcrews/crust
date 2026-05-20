@@ -244,6 +244,10 @@ function parseExtensionMessage(value) {
 			return { type: "chatSettings", includeIdeContextByDefault: value.includeIdeContextByDefault === true };
 		case "pathAutocomplete":
 			return typeof value.requestId === "number" ? { type: "pathAutocomplete", requestId: value.requestId, suggestions: arrayValue(value.suggestions) } : null;
+		case "projectFiles":
+			return { type: "projectFiles", files: arrayValue(value.files), roots: arrayValue(value.roots) };
+		case "fileReferencesValidated":
+			return typeof value.requestId === "number" ? { type: "fileReferencesValidated", requestId: value.requestId, references: arrayValue(value.references), missing: arrayValue(value.missing) } : null;
 		case "status":
 		case "error":
 			return { type: value.type, message: stringValue(value.message) };
@@ -298,6 +302,12 @@ window.addEventListener("message", (event) => {
 			break;
 		case "pathAutocomplete":
 			setPathSuggestions(message.requestId, message.suggestions);
+			break;
+		case "projectFiles":
+			setProjectFiles(message.files, message.roots);
+			break;
+		case "fileReferencesValidated":
+			setValidatedFileReferences(message.references, message.missing);
 			break;
 		case "status":
 			setStatus(message.message, false);

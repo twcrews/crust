@@ -261,6 +261,8 @@ suite('Webview message parsing', () => {
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'submit', text: 'hello' }), { type: 'submit', text: 'hello', includeIdeContext: false });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'submit', text: 'hello', includeIdeContext: true }), { type: 'submit', text: 'hello', includeIdeContext: true });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'selectModel' }), { type: 'selectModel', modelKey: undefined });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'openProjectFile', path: 'src/ui/chatPanel.ts:12' }), { type: 'openProjectFile', path: 'src/ui/chatPanel.ts:12' });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'validateFileReferences', requestId: 1, references: ['src/ui/chatPanel.ts', 2] }), { type: 'validateFileReferences', requestId: 1, references: ['src/ui/chatPanel.ts'] });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'debug' }), { type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'info' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'failed', level: 'error' }), { type: 'webviewLog', message: 'failed', details: undefined, level: 'error' });
 	});
@@ -271,6 +273,8 @@ suite('Webview message parsing', () => {
 		assert.strictEqual(parseWebviewMessage({ type: 'steer', text: 1 }), undefined);
 		assert.strictEqual(parseWebviewMessage({ type: 'selectModel', modelKey: 1 }), undefined);
 		assert.strictEqual(parseWebviewMessage({ type: 'pathAutocomplete', requestId: '1', query: 'src' }), undefined);
+		assert.strictEqual(parseWebviewMessage({ type: 'openProjectFile', path: 1 }), undefined);
+		assert.strictEqual(parseWebviewMessage({ type: 'validateFileReferences', requestId: '1', references: [] }), undefined);
 		assert.strictEqual(parseWebviewMessage({ type: 'unknown' }), undefined);
 	});
 });

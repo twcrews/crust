@@ -39,6 +39,13 @@ let promptHistory = Array.isArray(persistedWebviewState.promptHistory) ? persist
 let promptHistoryCursor = promptHistory.length;
 let promptHistoryDraft = "";
 let restoringPromptHistory = false;
+let projectFileReferences = new Set();
+let existingFileReferences = new Set();
+let missingFileReferences = new Set();
+let projectRoots = [];
+let pendingFileReferenceValidation = new Set();
+let fileReferenceValidationTimer = 0;
+let fileReferenceValidationRequestId = 0;
 
 const emptyStateFlavorTexts = [
 	"Fun fact: this extension was almost named 'Circumference'!",

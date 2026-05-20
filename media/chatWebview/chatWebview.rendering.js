@@ -117,7 +117,7 @@ function appendMessageContext(element, text, title, icon) {
 		context.append(icon);
 	}
 	const label = document.createElement("span");
-	label.textContent = text;
+	appendProjectFileLinkedText(label, text);
 	context.append(label);
 	element.append(context);
 }
@@ -305,6 +305,7 @@ function enhanceRenderedMarkdown(element) {
 	wrapCodeBlocks(element);
 	wrapTables(element);
 	hardenLinks(element);
+	linkifyProjectFileReferences(element);
 }
 
 function enhanceTaskListItems(element) {
@@ -487,7 +488,8 @@ function upsertTool(message) {
 	const toolName = document.createElement("span");
 	toolName.className = "tool-name";
 	toolName.textContent = message.toolName ?? "tool";
-	header.append(toolName, document.createTextNode(path + formatToolStatus(message.status)));
+	header.append(toolName);
+	appendProjectFileLinkedText(header, path + formatToolStatus(message.status));
 	header.title = headerText;
 	renderToolBody(body, message.body ?? "", Boolean(message.isDiff),);
 	body.hidden = !hasBody;
@@ -519,6 +521,159 @@ function renderToolBody(body, text, isDiff) {
 			body.append(document.createTextNode("\n"));
 		}
 	}
+}
+
+const PROJECT_FILE_REFERENCE_PATTERN = /(^|[^A-Za-z0-9@:/._-])(@?(?:(?:\/|~\/)(?:[A-Za-z0-9._@%+=,;~()-]+\/)+[A-Za-z0-9._@%+=,;~()-]+|(?:\.{1,2}\/)?(?:[A-Za-z0-9._-]+\/)+(?:[A-Za-z0-9._@%+=,;~() -]+\.[A-Za-z0-9]{1,8}|\.[A-Za-z0-9][A-Za-z0-9._-]*)|[A-Za-z0-9._-]+\.[A-Za-z0-9]{1,8}|\.[A-Za-z0-9][A-Za-z0-9._-]*)(?:[:#](?:L)?\d+(?::\d+)?)?)(?![A-Za-z0-9._/-])/g;
+const PROJECT_FILE_TRAILING_PUNCTUATION = /[),.;!?]+$/;
+
+function setProjectFiles(files, roots) {
+	projectFileReferences = new Set(files.filter((file) => typeof file === "string" && file).map(normalizeProjectFilePath));
+	projectRoots = roots.filter((root) => typeof root === "string" && root).map(normalizeProjectFilePath).map((root) => root.replace(/\/$/, ""));
+	rerenderFileReferenceContent();
+}
+
+function setValidatedFileReferences(references, missing) {
+	let changed = false;
+	for (const reference of references) {
+		if (typeof reference !== "string") {
+			continue;
+		}
+		const key = normalizeFileReferenceKey(reference);
+		if (!existingFileReferences.has(key)) {
+			existingFileReferences.add(key);
+			missingFileReferences.delete(key);
+			changed = true;
+		}
+	}
+	for (const reference of missing) {
+		if (typeof reference !== "string") {
+			continue;
+		}
+		const key = normalizeFileReferenceKey(reference);
+		if (key) {
+			missingFileReferences.add(key);
+		}
+	}
+	if (changed) {
+		rerenderFileReferenceContent();
+	}
+}
+
+function rerenderFileReferenceContent() {
+	for (const element of Array.from(document.querySelectorAll("[data-markdown]"))) {
+		renderMarkdown(element, element.dataset.markdown ?? "");
+	}
+	for (const element of Array.from(document.querySelectorAll(".message-context span, .tool-header"))) {
+		linkifyProjectFileReferences(element);
+	}
+}
+
+function linkifyProjectFileReferences(element) {
+	const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+		acceptNode(node) {
+			const parent = node.parentElement;
+			if (!parent || parent.closest("a, button, textarea, select")) {
+				return NodeFilter.FILTER_REJECT;
+			}
+			PROJECT_FILE_REFERENCE_PATTERN.lastIndex = 0;
+			return PROJECT_FILE_REFERENCE_PATTERN.test(node.textContent ?? "") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+		},
+	});
+	const textNodes = [];
+	while (walker.nextNode()) {
+		textNodes.push(walker.currentNode);
+	}
+	for (const node of textNodes) {
+		const fragment = document.createDocumentFragment();
+		appendProjectFileLinkedText(fragment, node.textContent ?? "");
+		node.replaceWith(fragment);
+	}
+}
+
+function appendProjectFileLinkedText(parent, text) {
+	PROJECT_FILE_REFERENCE_PATTERN.lastIndex = 0;
+	let lastIndex = 0;
+	let match;
+	while ((match = PROJECT_FILE_REFERENCE_PATTERN.exec(text)) !== null) {
+		const prefix = match[1] ?? "";
+		const rawReference = match[2] ?? "";
+		const referenceStart = match.index + prefix.length;
+		let reference = rawReference;
+		const trailing = reference.match(PROJECT_FILE_TRAILING_PUNCTUATION)?.[0] ?? "";
+		if (trailing) {
+			reference = reference.slice(0, -trailing.length);
+		}
+		if (!reference || !isExistingFileReference(reference)) {
+			queueFileReferenceValidation(reference);
+			continue;
+		}
+		parent.append(document.createTextNode(text.slice(lastIndex, referenceStart)));
+		parent.append(createProjectFileLink(reference));
+		lastIndex = referenceStart + reference.length;
+	}
+	parent.append(document.createTextNode(text.slice(lastIndex)));
+}
+
+function isExistingFileReference(reference) {
+	return Boolean(getProjectFileReferencePath(reference)) || existingFileReferences.has(normalizeFileReferenceKey(reference));
+}
+
+function getProjectFileReferencePath(reference) {
+	let value = normalizeFileReferenceKey(reference);
+	if (!value) {
+		return "";
+	}
+	value = value.replace(/^\.\//, "");
+	if (projectFileReferences.has(value)) {
+		return value;
+	}
+	for (const root of projectRoots) {
+		const prefix = root + "/";
+		if (value.startsWith(prefix)) {
+			const relative = value.slice(prefix.length);
+			return projectFileReferences.has(relative) ? relative : "";
+		}
+	}
+	return "";
+}
+
+function normalizeFileReferenceKey(reference) {
+	let value = normalizeProjectFilePath(reference).replace(/^@/, "").replace(/^`|`$/g, "");
+	value = value.replace(/^["'<({[]+|["'>)}\],.;!?]+$/g, "");
+	value = value.replace(/(?:[:#]L?)\d+(?::\d+)?$/i, "");
+	return !value || /^[a-z][a-z0-9+.-]*:/i.test(value) ? "" : value;
+}
+
+function queueFileReferenceValidation(reference) {
+	const key = normalizeFileReferenceKey(reference);
+	if (!key || pendingFileReferenceValidation.has(reference) || existingFileReferences.has(key) || missingFileReferences.has(key)) {
+		return;
+	}
+	pendingFileReferenceValidation.add(reference);
+	window.clearTimeout(fileReferenceValidationTimer);
+	fileReferenceValidationTimer = window.setTimeout(() => {
+		const references = [...pendingFileReferenceValidation];
+		pendingFileReferenceValidation.clear();
+		vscode.postMessage({ type: "validateFileReferences", requestId: ++fileReferenceValidationRequestId, references });
+	}, 50);
+}
+
+function normalizeProjectFilePath(path) {
+	return path.replace(/\\/g, "/").replace(/\/+/g, "/");
+}
+
+function createProjectFileLink(reference) {
+	const link = document.createElement("a");
+	link.href = "#";
+	link.className = "project-file-link";
+	link.dataset.projectFile = reference;
+	link.textContent = reference;
+	link.title = "Open " + reference;
+	link.addEventListener("click", (event) => {
+		event.preventDefault();
+		vscode.postMessage({ type: "openProjectFile", path: reference });
+	});
+	return link;
 }
 
 function formatToolStatus(status) {

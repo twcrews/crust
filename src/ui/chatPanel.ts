@@ -1,5 +1,8 @@
-import { watch, type FSWatcher } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { watch, type Dirent, type FSWatcher } from 'node:fs';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import * as path from 'node:path';
+import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import { PiRpcClient } from '../pi/piRpcClient';
 import { type Model, type RpcEvent, type SlashCommand } from '../pi/rpcTypes';
@@ -17,6 +20,8 @@ import { restoreSessionMessages } from './sessionRestoreRenderer';
 import { getBuiltinSlashCommands, getPiChangelogMarkdown, isSupportedBuiltinSlashCommand, orderSlashCommands } from './slashCommands';
 import { StreamingEventRenderer } from './streamingEventRenderer';
 import { formatUsageStatus } from './usageStatus';
+
+const execFileAsync = promisify(execFile);
 
 function getAllowRawHtmlSetting(): boolean {
 	return vscode.workspace.getConfiguration('crust.markdown').get<boolean>('allowRawHtml', false);
@@ -153,6 +158,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	private sessionWatcherTimer: NodeJS.Timeout | undefined;
 	private allowRawHtml = getAllowRawHtmlSetting();
 	private includeIdeContextByDefault = getIncludeIdeContextByDefaultSetting();
+	private projectFilesByRoot = new Map<string, Set<string>>();
 
 	static show(context: vscode.ExtensionContext): void {
 		void CrustChatPanel.open(context);
@@ -233,6 +239,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.postChatSettings();
 		this.postIdeContext();
 		try {
+			await this.postProjectFiles();
 			this.log('Initializing Pi RPC client');
 			await this.client.start();
 			const [models, initialState, commands, builtinCommands] = await Promise.all([
@@ -313,6 +320,12 @@ export class CrustChatPanel implements vscode.Disposable {
 			case 'pathAutocomplete':
 				await this.postPathAutocomplete(message.requestId, message.query ?? '');
 				break;
+			case 'openProjectFile':
+				await this.openProjectFile(message.path ?? '');
+				break;
+			case 'validateFileReferences':
+				await this.validateFileReferences(message.requestId, message.references);
+				break;
 			case 'refreshSlashCommands':
 				await this.refreshSlashCommands();
 				break;
@@ -329,6 +342,156 @@ export class CrustChatPanel implements vscode.Disposable {
 		if (this.isPiNotInstalledError(message)) {
 			this.showPiNotInstalledToast(message);
 		}
+	}
+
+	private async postProjectFiles(): Promise<void> {
+		const roots = this.getProjectRoots();
+		const files = new Set<string>();
+		const projectFilesByRoot = new Map<string, Set<string>>();
+		await Promise.all(roots.map(async (root) => {
+			const rootFiles = new Set(await this.listProjectFiles(root));
+			projectFilesByRoot.set(root, rootFiles);
+			for (const file of rootFiles) {
+				files.add(file);
+			}
+		}));
+		this.projectFilesByRoot = projectFilesByRoot;
+		this.post({ type: 'projectFiles', files: [...files], roots });
+	}
+
+	private getProjectRoots(): string[] {
+		const roots = [this.cwd, ...(vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)].filter((root): root is string => Boolean(root));
+		return [...new Set(roots.map((root) => path.resolve(root)))];
+	}
+
+	private async listProjectFiles(root: string): Promise<string[]> {
+		try {
+			const [visible, ignored] = await Promise.all([
+				execFileAsync('git', ['-C', root, 'ls-files', '-z', '--cached', '--others'], { maxBuffer: 20 * 1024 * 1024 }),
+				execFileAsync('git', ['-C', root, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard'], { maxBuffer: 20 * 1024 * 1024 }),
+			]);
+			return [...new Set(`${visible.stdout}\0${ignored.stdout}`.split('\0').filter(Boolean).map((file) => this.normalizeWebviewPath(file)))];
+		} catch (error) {
+			this.log('Falling back to filesystem walk for project file linkification', { root, error: errorMessage(error) }, 'warn');
+			return this.walkProjectFiles(root);
+		}
+	}
+
+	private async walkProjectFiles(root: string): Promise<string[]> {
+		const files: string[] = [];
+		const pending = [root];
+		while (pending.length && files.length < 20000) {
+			const directory = pending.pop();
+			if (!directory) {
+				continue;
+			}
+			let entries: Dirent[];
+			try {
+				entries = await readdir(directory, { withFileTypes: true });
+			} catch {
+				continue;
+			}
+			for (const entry of entries) {
+				const fullPath = path.join(directory, entry.name);
+				if (entry.isDirectory()) {
+					if (entry.name !== '.git') {
+						pending.push(fullPath);
+					}
+					continue;
+				}
+				if (entry.isFile()) {
+					files.push(this.normalizeWebviewPath(path.relative(root, fullPath)));
+				}
+			}
+		}
+		return files;
+	}
+
+	private normalizeWebviewPath(filePath: string): string {
+		return filePath.replace(/\\/g, '/').replace(/^\.\//, '');
+	}
+
+	private async validateFileReferences(requestId: number, references: string[]): Promise<void> {
+		const valid: string[] = [];
+		const missing: string[] = [];
+		await Promise.all([...new Set(references)].map(async (reference) => {
+			const target = this.resolveFileReference(reference, false);
+			if (!target) {
+				missing.push(reference);
+				return;
+			}
+			try {
+				const stats = await stat(target.filePath);
+				if (stats.isFile()) {
+					valid.push(reference);
+					return;
+				}
+			} catch {
+				// Non-existing candidates are expected and should simply remain plain text.
+			}
+			missing.push(reference);
+		}));
+		this.post({ type: 'fileReferencesValidated', requestId, references: valid, missing });
+	}
+
+	private async openProjectFile(reference: string): Promise<void> {
+		const target = this.resolveProjectFileReference(reference);
+		if (!target) {
+			return;
+		}
+		try {
+			const stats = await stat(target.filePath);
+			if (!stats.isFile()) {
+				return;
+			}
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(target.filePath));
+			const editor = await vscode.window.showTextDocument(document, { preview: false });
+			if (target.line !== undefined) {
+				const line = Math.min(Math.max(target.line - 1, 0), Math.max(document.lineCount - 1, 0));
+				const character = Math.max((target.column ?? 1) - 1, 0);
+				const position = new vscode.Position(line, Math.min(character, document.lineAt(line).text.length));
+				editor.selection = new vscode.Selection(position, position);
+				editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+			}
+		} catch (error) {
+			this.log('Failed to open project file reference', { reference, path: target.filePath, error: errorMessage(error) }, 'warn');
+			void vscode.window.showWarningMessage(`Crust could not open ${reference}.`);
+		}
+	}
+
+	private resolveProjectFileReference(reference: string): { filePath: string; line?: number; column?: number } | undefined {
+		return this.resolveFileReference(reference, true);
+	}
+
+	private resolveFileReference(reference: string, requireIndexedProjectFile: boolean): { filePath: string; line?: number; column?: number } | undefined {
+		let value = reference.trim().replace(/^@/, '');
+		if (!value) {
+			return undefined;
+		}
+		value = value.replace(/^`|`$/g, '').replace(/^["'<({[]+|["'>)}\],.;!?]+$/g, '');
+		const location = value.match(/(?:[:#]L?)(\d+)(?::(\d+))?$/i);
+		const line = location ? Number(location[1]) : undefined;
+		const column = location?.[2] ? Number(location[2]) : undefined;
+		if (location) {
+			value = value.slice(0, location.index);
+		}
+		if (!value || /^[a-z][a-z0-9+.-]*:/i.test(value)) {
+			return undefined;
+		}
+
+		if (path.isAbsolute(value)) {
+			return { filePath: path.resolve(value), line, column };
+		}
+
+		const roots = this.getProjectRoots();
+		for (const root of roots) {
+			const filePath = path.resolve(root, value.replace(/^~\//, ''));
+			const relative = this.normalizeWebviewPath(path.relative(root, filePath));
+			if (!requireIndexedProjectFile || this.projectFilesByRoot.get(root)?.has(relative)) {
+				return { filePath, line, column };
+			}
+		}
+		return undefined;
 	}
 
 	private isPiNotInstalledError(message: string): boolean {

@@ -9,6 +9,8 @@ export type WebviewMessage =
 	| { type: 'newChat' }
 	| { type: 'slashCommand'; commandName: string; commandText: string }
 	| { type: 'pathAutocomplete'; requestId: number; query: string }
+	| { type: 'openProjectFile'; path: string }
+	| { type: 'validateFileReferences'; requestId: number; references: string[] }
 	| { type: 'refreshSlashCommands' }
 	| { type: 'webviewLog'; message: string; details: unknown; level: 'info' | 'warn' | 'error' };
 
@@ -45,6 +47,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
 		case 'pathAutocomplete':
 			return typeof message.requestId === 'number' && typeof message.query === 'string'
 				? { type: 'pathAutocomplete', requestId: message.requestId, query: message.query }
+				: undefined;
+		case 'openProjectFile':
+			return typeof message.path === 'string' ? { type: 'openProjectFile', path: message.path } : undefined;
+		case 'validateFileReferences':
+			return typeof message.requestId === 'number' && Array.isArray(message.references)
+				? { type: 'validateFileReferences', requestId: message.requestId, references: message.references.filter((reference): reference is string => typeof reference === 'string') }
 				: undefined;
 		case 'webviewLog': {
 			const level = message.level === 'warn' || message.level === 'error' ? message.level : 'info';
