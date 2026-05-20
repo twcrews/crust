@@ -172,6 +172,33 @@ suite('Pi RPC client', () => {
 		assert.strictEqual(await client.clone(), false);
 		assert.deepStrictEqual(sentTypes, ['clone']);
 	});
+
+	test('returns exported HTML path from Pi RPC', async () => {
+		type TestableClient = {
+			start: () => Promise<void>;
+			process?: { stdin: { write: (payload: string, callback: (error?: Error) => void) => void } };
+			handleStdout: (chunk: string) => void;
+		};
+
+		const client = new PiRpcClient(undefined);
+		const testable = client as unknown as TestableClient;
+		const sent: unknown[] = [];
+		testable.start = async () => {
+			testable.process = {
+				stdin: {
+					write: (payload, callback) => {
+						const command = JSON.parse(payload) as { id: string; type: string; outputPath?: string };
+						sent.push(command);
+						callback();
+						testable.handleStdout(`${JSON.stringify({ type: 'response', id: command.id, command: command.type, success: true, data: { path: '/tmp/session.html' } })}\n`);
+					},
+				},
+			};
+		};
+
+		assert.strictEqual(await client.exportHtml('/tmp/session.html'), '/tmp/session.html');
+		assert.deepStrictEqual(sent, [{ id: (sent[0] as { id: string }).id, type: 'export_html', outputPath: '/tmp/session.html' }]);
+	});
 });
 
 suite('Slash commands', () => {
@@ -180,7 +207,7 @@ suite('Slash commands', () => {
 		process.env.PATH = '';
 		try {
 			const commands = await getBuiltinSlashCommands(() => undefined);
-			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'clone', 'name', 'session', 'resume', 'model', 'copy', 'changelog', 'reload', 'quit']);
+			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'clone', 'export', 'name', 'session', 'resume', 'model', 'copy', 'changelog', 'reload', 'quit']);
 			assert.ok(commands.every((command) => command.source === 'builtin'));
 		} finally {
 			process.env.PATH = originalPath;
@@ -205,6 +232,7 @@ suite('Slash commands', () => {
 		assert.deepStrictEqual(orderSlashCommands([
 			{ name: 'new', source: 'builtin' },
 			{ name: 'clone', source: 'builtin' },
+			{ name: 'export', source: 'builtin' },
 			{ name: 'copy', source: 'builtin' },
 			{ name: 'session', source: 'builtin' },
 			{ name: 'changelog', source: 'builtin' },
@@ -214,7 +242,7 @@ suite('Slash commands', () => {
 		], [
 			{ name: 'skill:fix', source: 'custom' },
 			{ name: 'project:review', source: 'custom' },
-		]).map((command) => command.name), ['new', 'clone', 'copy', 'session', 'changelog', 'reload', 'skill:fix', 'project:review', 'help', 'doctor']);
+		]).map((command) => command.name), ['new', 'clone', 'export', 'copy', 'session', 'changelog', 'reload', 'skill:fix', 'project:review', 'help', 'doctor']);
 	});
 
 	test('returns fallback text when Pi changelog cannot be loaded', async () => {

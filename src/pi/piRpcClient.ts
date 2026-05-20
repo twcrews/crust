@@ -112,6 +112,12 @@ export class PiRpcClient implements vscode.Disposable {
 		return !data?.cancelled;
 	}
 
+	async exportHtml(outputPath?: string): Promise<string> {
+		const response = await this.send({ type: 'export_html', ...(outputPath ? { outputPath } : {}) });
+		const data = response.data as { path?: unknown } | undefined;
+		return typeof data?.path === 'string' ? data.path : '';
+	}
+
 	async getSessionStats(): Promise<unknown> {
 		const response = await this.send({ type: 'get_session_stats' });
 		return response.data;

@@ -20,7 +20,7 @@ The goal of Crust is to offer feature parity with existing similar extensions (l
 - **Login/logout** — manage model provider credentials directly from the extension
 - **Change reversion** — roll back file changes made during a session with a single click
 - **Settings UI** — configure Pi through a dedicated settings panel
-- **Chat import/export** — save sessions to disk or load them back into the extension
+- **Chat import/JSONL export** — load sessions back into the extension or save them as JSONL
 - **Session sharing** — generate a shareable link to a session for collaboration or review
 
 ## Requirements
@@ -31,6 +31,7 @@ Follow Pi's documentation to get started: https://pi.dev/docs/latest/quickstart
 
 ## Limitations
 
+- **`/export` supports HTML only** — Pi RPC exposes HTML session export, so Crust supports `/export` and `/export path.html`. Pi's TUI also supports JSONL export with `/export path.jsonl`, but JSONL export is not exposed by Pi RPC yet.
 - **`/reload` is emulated** — Pi's TUI has a built-in `/reload` command for reloading keybindings, extensions, skills, prompts, and themes. Pi RPC mode does not currently expose that command directly, so Crust emulates it by restarting its `pi --mode rpc` child process, restoring the active session, and refreshing models and slash commands. This reloads Pi-side resources without reloading the VS Code extension host; changes to Crust's own extension code or VS Code contributions still require the normal VS Code extension reload workflow.
 
 ## Contributing

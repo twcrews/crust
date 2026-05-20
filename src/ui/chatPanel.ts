@@ -96,6 +96,23 @@ function formatCurrency(value: number): string {
 	return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
 
+function getPathCommandArgument(text: string, command: string): string | undefined {
+	if (text === command || !text.startsWith(`${command} `)) {
+		return undefined;
+	}
+	const argsString = text.slice(command.length + 1).trimStart();
+	if (!argsString) {
+		return undefined;
+	}
+	const firstChar = argsString[0];
+	if (firstChar === '"' || firstChar === "'") {
+		const closingQuoteIndex = argsString.indexOf(firstChar, 1);
+		return closingQuoteIndex < 0 ? undefined : argsString.slice(1, closingQuoteIndex);
+	}
+	const firstWhitespaceIndex = argsString.search(/\s/);
+	return firstWhitespaceIndex < 0 ? argsString : argsString.slice(0, firstWhitespaceIndex);
+}
+
 export class CrustChatPanel implements vscode.Disposable {
 	private static readonly viewType = 'crustChat';
 	private readonly output = getCrustOutputChannel();
@@ -498,6 +515,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			case 'clone':
 				await this.cloneSession(commandText.trim() || '/clone');
 				return;
+			case 'export':
+				await this.exportSession(commandText.trim() || '/export');
+				return;
 			case 'name':
 				await this.client.setSessionName(args);
 				this.post({ type: 'sessionTitle', title: args || 'New Chat' });
@@ -576,6 +596,27 @@ export class CrustChatPanel implements vscode.Disposable {
 		} finally {
 			this.setProcessing(false);
 			resetStreamingState(this.conversationState);
+		}
+	}
+
+	private async exportSession(invocation: string): Promise<void> {
+		this.log('Exporting session to HTML');
+		if (!this.conversationState.hasSessionTitle) {
+			this.setSessionTitleFromPrompt(invocation);
+		}
+		this.post({ type: 'addMessage', id: createId('user'), role: 'user', text: '', slashCommandLabel: invocation });
+
+		const outputPath = getPathCommandArgument(invocation, '/export');
+		if (outputPath?.endsWith('.jsonl')) {
+			this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: 'Crust currently supports `/export` for HTML only. JSONL export is not exposed by Pi RPC yet.', secondary: true });
+			return;
+		}
+
+		try {
+			const exportedPath = await this.client.exportHtml(outputPath);
+			this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: `Session exported to: \`${exportedPath || outputPath || 'session.html'}\``, secondary: true });
+		} catch (error) {
+			this.postError(errorMessage(error), { operation: 'exportSession' });
 		}
 	}
 
