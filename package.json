@@ -5,7 +5,10 @@
   "version": "0.0.1",
   "publisher": "crews",
   "icon": "branding/icon.png",
-  "repository": "https://github.com/twcrews/crust",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/twcrews/crust.git"
+  },
   "engines": {
     "vscode": "^1.74.0"
   },

@@ -4,6 +4,8 @@ Crust is an extension for Visual Studio Code that acts as a true UI for the [Pi 
 
 The goal of Crust is to offer feature parity with existing similar extensions (like the [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)).
 
+![Screenshot](branding/screenshot.png)
+
 ## Features
 
 - **Session browser** — view and resume your past Pi agent sessions
@@ -12,7 +14,7 @@ The goal of Crust is to offer feature parity with existing similar extensions (l
 - **File autocomplete with `@`** — reference workspace files in your prompt without leaving the chat
 - **Rich markdown rendering** — responses render with full markdown: headings, tables, code blocks, and more
 - **Rich diff snippets** — code changes are shown as inline diffs so you can review edits at a glance
-- **Optional terminal view** — opt in to opening Pi's native TUI in a VS Code terminal editor tab with Crust-provided IDE context injection
+- **Terminal view** — opt in to opening Pi's native TUI in a VS Code terminal editor tab with Crust-provided IDE context injection
 
 ### Planned Features
 
