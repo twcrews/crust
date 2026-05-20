@@ -19,6 +19,10 @@
     "onCommand:crust.openChat",
     "onCommand:crust.openChatTerminal",
     "onCommand:crust.openChatDefault",
+    "onCommand:crust.restoreSession",
+    "onCommand:crust.sessions.refresh",
+    "onCommand:crust.sessions.open",
+    "onView:crust.sessions",
     "onWebviewPanel:crustChat"
   ],
   "contributes": {
@@ -46,6 +50,23 @@
           "light": "branding/icon-small.svg",
           "dark": "branding/icon-small.svg"
         }
+      },
+      {
+        "command": "crust.restoreSession",
+        "title": "Crust: Restore Session",
+        "icon": {
+          "light": "branding/icon-small.svg",
+          "dark": "branding/icon-small.svg"
+        }
+      },
+      {
+        "command": "crust.sessions.refresh",
+        "title": "Crust: Refresh Sessions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "crust.sessions.open",
+        "title": "Crust: Open Session"
       }
     ],
     "keybindings": [
@@ -61,6 +82,13 @@
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "crust.sessions.refresh",
+          "when": "view == crust.sessions",
+          "group": "navigation"
+        }
+      ],
       "editor/title": [
         {
           "command": "crust.openChatDefault",
@@ -71,6 +99,29 @@
         {
           "command": "crust.openChatDefault",
           "when": "false"
+        },
+        {
+          "command": "crust.sessions.open",
+          "when": "false"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "crust",
+          "title": "Crust",
+          "icon": "branding/icon-small-stroke.svg"
+        }
+      ]
+    },
+    "views": {
+      "crust": [
+        {
+          "id": "crust.sessions",
+          "name": "Crust",
+          "type": "webview",
+          "icon": "branding/icon-small.svg"
         }
       ]
     },
@@ -95,7 +146,7 @@
         "crust.chat.useTerminalViewByDefault": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "When enabled, clicking the Crust editor toolbar button opens a VS Code terminal editor running Pi's native TUI instead of the Crust webview."
+          "markdownDescription": "When enabled, opening a Pi session or clicking the Crust editor toolbar button opens a VS Code terminal editor running Pi's native TUI instead of the Crust webview."
         },
         "crust.chat.lockEditorGroupOnOpen": {
           "type": "boolean",

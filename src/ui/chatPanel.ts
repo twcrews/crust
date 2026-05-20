@@ -141,6 +141,10 @@ function getPathCommandArgument(text: string, command: string): string | undefin
 
 export class CrustChatPanel implements vscode.Disposable {
 	private static readonly viewType = 'crustChat';
+	private static readonly openPanels = new Set<CrustChatPanel>();
+	private static readonly onDidChangeOpenSessionsEmitter = new vscode.EventEmitter<void>();
+	static readonly onDidChangeOpenSessions = CrustChatPanel.onDidChangeOpenSessionsEmitter.event;
+	private static lastFocusedPanel: CrustChatPanel | undefined;
 	private readonly output = getCrustOutputChannel();
 	private readonly disposables: vscode.Disposable[] = [];
 	private readonly cwd: string | undefined;
@@ -164,6 +168,32 @@ export class CrustChatPanel implements vscode.Disposable {
 		void CrustChatPanel.open(context);
 	}
 
+	static hasOpenPanel(): boolean {
+		return this.openPanels.size > 0;
+	}
+
+	static getOpenSessionPaths(): Set<string> {
+		return new Set([...this.openPanels].map((panel) => panel.activeSessionPath).filter((path): path is string => Boolean(path)));
+	}
+
+	static async openSession(context: vscode.ExtensionContext, sessionPath: string): Promise<void> {
+		const alreadyOpenPanel = [...this.openPanels].find((panel) => panel.activeSessionPath === sessionPath);
+		if (alreadyOpenPanel) {
+			alreadyOpenPanel.panel.reveal(alreadyOpenPanel.panel.viewColumn ?? vscode.ViewColumn.Beside);
+			alreadyOpenPanel.focusPrompt();
+			return;
+		}
+
+		const panel = this.lastFocusedPanel ?? this.openPanels.values().next().value as CrustChatPanel | undefined;
+		if (panel) {
+			panel.panel.reveal(panel.panel.viewColumn ?? vscode.ViewColumn.Beside);
+			await panel.restoreSessionPath(sessionPath);
+			panel.focusPrompt();
+			return;
+		}
+		await CrustChatPanel.open(context, sessionPath);
+	}
+
 	static registerSerializer(context: vscode.ExtensionContext): vscode.Disposable {
 		return vscode.window.registerWebviewPanelSerializer(CrustChatPanel.viewType, {
 			deserializeWebviewPanel: async (panel, state: unknown) => {
@@ -177,7 +207,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		});
 	}
 
-	private static async open(context: vscode.ExtensionContext): Promise<void> {
+	private static async open(context: vscode.ExtensionContext, sessionPath?: string): Promise<void> {
 		const panel = vscode.window.createWebviewPanel(
 			CrustChatPanel.viewType,
 			'Crust Chat',
@@ -185,7 +215,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			{ enableScripts: true, retainContextWhenHidden: true },
 		);
 
-		const chatPanel = new CrustChatPanel(context, panel);
+		const chatPanel = new CrustChatPanel(context, panel, sessionPath);
 		if (getLockEditorGroupOnOpenSetting()) {
 			await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
 		}
@@ -203,8 +233,16 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.panel.iconPath = this.getIconPath();
 		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview, { allowRawHtml: this.allowRawHtml, includeIdeContextByDefault: this.includeIdeContextByDefault });
 
+		CrustChatPanel.openPanels.add(this);
+		CrustChatPanel.lastFocusedPanel = this;
+
 		this.disposables.push(
 			this.panel.onDidDispose(() => this.dispose()),
+			this.panel.onDidChangeViewState((event) => {
+				if (event.webviewPanel.active) {
+					CrustChatPanel.lastFocusedPanel = this;
+				}
+			}),
 			this.panel.webview.onDidReceiveMessage((message: unknown) => this.handleWebviewMessage(message)),
 			vscode.window.onDidChangeActiveTextEditor((editor) => {
 				if (editor) {
@@ -227,6 +265,11 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	dispose(): void {
 		this.log('Disposing chat panel');
+		CrustChatPanel.openPanels.delete(this);
+		if (CrustChatPanel.lastFocusedPanel === this) {
+			CrustChatPanel.lastFocusedPanel = CrustChatPanel.openPanels.values().next().value as CrustChatPanel | undefined;
+		}
+		CrustChatPanel.onDidChangeOpenSessionsEmitter.fire();
 		this.client.dispose();
 		this.disposeSessionWatcher();
 		while (this.disposables.length) {
@@ -573,6 +616,10 @@ export class CrustChatPanel implements vscode.Disposable {
 		} catch (error) {
 			this.postError(errorMessage(error), { operation: 'showHistory' });
 		}
+	}
+
+	private async restoreSessionPath(sessionPath: string): Promise<void> {
+		await this.restoreSession({ path: sessionPath, firstMessage: '', modified: new Date(), messageCount: 0 });
 	}
 
 	private async restoreSession(session: SessionInfo): Promise<void> {
@@ -1017,6 +1064,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 		this.disposeSessionWatcher();
 		this.activeSessionPath = sessionPath;
+		CrustChatPanel.onDidChangeOpenSessionsEmitter.fire();
 		if (!sessionPath) {
 			return;
 		}

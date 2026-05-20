@@ -43,6 +43,11 @@ export class CrustTerminalView {
 	private static bridgeUrl: string | undefined;
 	private static bridgeToken: string | undefined;
 	private static terminalIds = new WeakMap<vscode.Terminal, string>();
+	private static terminalsById = new Map<string, vscode.Terminal>();
+	private static sessionFilesByTerminalId = new Map<string, string>();
+	private static lastFocusedTerminalId: string | undefined;
+	private static readonly onDidChangeOpenSessionsEmitter = new vscode.EventEmitter<void>();
+	static readonly onDidChangeOpenSessions = CrustTerminalView.onDidChangeOpenSessionsEmitter.event;
 
 	static register(context: vscode.ExtensionContext): vscode.Disposable {
 		this.lastActiveTextEditor = this.getCurrentTextEditor();
@@ -73,13 +78,14 @@ export class CrustTerminalView {
 				}
 			}),
 			vscode.window.onDidCloseTerminal((terminal) => this.onDidCloseTerminal(context, terminal)),
+			vscode.window.onDidChangeActiveTerminal((terminal) => this.onDidChangeActiveTerminal(terminal)),
 			new vscode.Disposable(() => this.bridgeServer?.close()),
 		];
 		this.listenersRegistered = true;
 		return vscode.Disposable.from(...disposables);
 	}
 
-	static async show(context: vscode.ExtensionContext): Promise<void> {
+	static async show(context: vscode.ExtensionContext, sessionFile?: string): Promise<void> {
 		if (!this.listenersRegistered) {
 			context.subscriptions.push(this.register(context));
 		}
@@ -87,10 +93,11 @@ export class CrustTerminalView {
 
 		await this.ensureBridge(context);
 		const terminalId = randomUUID();
-		const args = this.buildPiArgs(context);
+		const args = this.buildPiArgs(context, sessionFile);
 		const terminal = this.createTerminal(context, terminalId, args);
 		this.terminalIds.set(terminal, terminalId);
-		await this.updateSession(context, terminalId, '');
+		this.terminalsById.set(terminalId, terminal);
+		await this.updateSession(context, terminalId, sessionFile || '');
 		terminal.show();
 		await this.lockEditorGroupIfEnabled();
 	}
@@ -100,7 +107,7 @@ export class CrustTerminalView {
 			name: 'Crust',
 			shellPath: getPiCommandPathSetting(),
 			shellArgs: args,
-			location: { viewColumn: vscode.ViewColumn.Beside },
+			location: { viewColumn: vscode.ViewColumn.Active },
 			isTransient: false,
 			cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
 			env: this.contextFile ? {
@@ -173,23 +180,84 @@ export class CrustTerminalView {
 		}
 	}
 
+	static getOpenSessionPaths(): Set<string> {
+		return new Set([...this.sessionFilesByTerminalId.values()].filter((path) => Boolean(path)));
+	}
+
+	static focusSession(sessionFile: string): boolean {
+		const terminalId = [...this.sessionFilesByTerminalId.entries()].find(([, path]) => path === sessionFile)?.[0];
+		const terminal = terminalId ? this.terminalsById.get(terminalId) : undefined;
+		if (!terminal) {
+			return false;
+		}
+		terminal.show();
+		this.lastFocusedTerminalId = terminalId;
+		return true;
+	}
+
+	static hasOpenTerminal(): boolean {
+		return this.terminalsById.size > 0;
+	}
+
+	static async replaceSession(context: vscode.ExtensionContext, sessionFile: string): Promise<void> {
+		const terminalId = this.lastFocusedTerminalId && this.terminalsById.has(this.lastFocusedTerminalId)
+			? this.lastFocusedTerminalId
+			: this.terminalsById.keys().next().value as string | undefined;
+		if (!terminalId) {
+			await this.show(context, sessionFile);
+			return;
+		}
+
+		const previousTerminal = this.terminalsById.get(terminalId);
+		previousTerminal?.show();
+		await this.show(context, sessionFile);
+		previousTerminal?.dispose();
+		await this.removeSession(context, terminalId);
+	}
+
 	private static async updateSession(context: vscode.ExtensionContext, terminalId: string, sessionFile: string): Promise<void> {
 		const sessions = context.workspaceState.get<TerminalSessionMap>(terminalSessionsKey, {});
+		this.sessionFilesByTerminalId.set(terminalId, sessionFile);
+		this.onDidChangeOpenSessionsEmitter.fire();
 		await context.workspaceState.update(terminalSessionsKey, { ...sessions, [terminalId]: sessionFile });
+	}
+
+	private static onDidChangeActiveTerminal(terminal: vscode.Terminal | undefined): void {
+		if (!terminal) {
+			return;
+		}
+		const terminalId = this.terminalIds.get(terminal);
+		if (terminalId) {
+			this.lastFocusedTerminalId = terminalId;
+		}
 	}
 
 	private static onDidCloseTerminal(context: vscode.ExtensionContext, terminal: vscode.Terminal): void {
 		const terminalId = this.terminalIds.get(terminal);
-		const exitReason = terminal.exitStatus?.reason;
-		if (!terminalId || exitReason === vscode.TerminalExitReason.Shutdown || exitReason === undefined || exitReason === vscode.TerminalExitReason.Unknown) {
+		if (!terminalId) {
 			return;
 		}
+		this.terminalsById.delete(terminalId);
+		this.sessionFilesByTerminalId.delete(terminalId);
+		if (this.lastFocusedTerminalId === terminalId) {
+			this.lastFocusedTerminalId = undefined;
+		}
+		this.onDidChangeOpenSessionsEmitter.fire();
+
+		const exitReason = terminal.exitStatus?.reason;
+		if (exitReason === vscode.TerminalExitReason.Shutdown || exitReason === undefined || exitReason === vscode.TerminalExitReason.Unknown) {
+			return;
+		}
+		void this.removeSession(context, terminalId);
+	}
+
+	private static async removeSession(context: vscode.ExtensionContext, terminalId: string): Promise<void> {
 		const sessions = context.workspaceState.get<TerminalSessionMap>(terminalSessionsKey, {});
 		if (!(terminalId in sessions)) {
 			return;
 		}
 		const { [terminalId]: _removed, ...remainingSessions } = sessions;
-		void context.workspaceState.update(terminalSessionsKey, remainingSessions);
+		await context.workspaceState.update(terminalSessionsKey, remainingSessions);
 	}
 
 	private static async restore(context: vscode.ExtensionContext): Promise<void> {
@@ -206,6 +274,8 @@ export class CrustTerminalView {
 			validSessions[terminalId] = sessionFile;
 			const terminal = this.createTerminal(context, terminalId, this.buildPiArgs(context, sessionFile || undefined));
 			this.terminalIds.set(terminal, terminalId);
+			this.terminalsById.set(terminalId, terminal);
+			this.sessionFilesByTerminalId.set(terminalId, sessionFile);
 			terminal.show();
 			await this.lockEditorGroupIfEnabled();
 		}

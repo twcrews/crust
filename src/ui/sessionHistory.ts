@@ -3,13 +3,23 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as vscode from 'vscode';
-import type { PiRpcClient } from '../pi/piRpcClient';
 import type { SessionInfo } from './chatTypes';
 import { extractRestoredPrompt } from './ideContext';
 import { getEntryTimestamp, getMessageRole, getMessageText, getMessageTimestamp, parseJsonObject } from './messageUtils';
 
-export async function listSessions(client: PiRpcClient, cwd: string | undefined): Promise<SessionInfo[]> {
+type SessionStateClient = { getState(): Promise<unknown> };
+
+export async function listSessions(client: SessionStateClient, cwd: string | undefined): Promise<SessionInfo[]> {
 	const sessionDir = await getSessionDir(client, cwd);
+	return listSessionsFromDirectory(sessionDir);
+}
+
+export async function listSessionsForCwd(cwd: string | undefined): Promise<SessionInfo[]> {
+	const sessionDir = getDefaultSessionDir(cwd);
+	return listSessionsFromDirectory(sessionDir);
+}
+
+async function listSessionsFromDirectory(sessionDir: string | undefined): Promise<SessionInfo[]> {
 	if (!sessionDir || !existsSync(sessionDir)) {
 		return [];
 	}
@@ -25,7 +35,7 @@ export async function listSessions(client: PiRpcClient, cwd: string | undefined)
 		.sort((a, b) => b.modified.getTime() - a.modified.getTime());
 }
 
-async function getSessionDir(client: PiRpcClient, cwd: string | undefined): Promise<string | undefined> {
+async function getSessionDir(client: SessionStateClient, cwd: string | undefined): Promise<string | undefined> {
 	const state = await client.getState();
 	const sessionFile = typeof (state as { sessionFile?: unknown } | undefined)?.sessionFile === 'string'
 		? (state as { sessionFile: string }).sessionFile
@@ -33,6 +43,10 @@ async function getSessionDir(client: PiRpcClient, cwd: string | undefined): Prom
 	if (sessionFile) {
 		return dirname(sessionFile);
 	}
+	return getDefaultSessionDir(cwd);
+}
+
+function getDefaultSessionDir(cwd: string | undefined): string | undefined {
 	const workspaceCwd = cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 	if (!workspaceCwd) {
 		return undefined;
