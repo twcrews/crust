@@ -27,8 +27,8 @@ function getLockEditorGroupOnOpenSetting(): boolean {
 	return vscode.workspace.getConfiguration('crust.chat').get<boolean>('lockEditorGroupOnOpen', true);
 }
 
-export function getUseTerminalViewSetting(): boolean {
-	return vscode.workspace.getConfiguration('crust.chat').get<boolean>('useTerminalView', false);
+export function getUseTerminalViewByDefaultSetting(): boolean {
+	return vscode.workspace.getConfiguration('crust.chat').get<boolean>('useTerminalViewByDefault', false);
 }
 
 const terminalSessionsKey = 'crust.terminalSessions';
@@ -50,7 +50,7 @@ export class CrustTerminalView {
 		void this.writeIdeContext();
 
 		void this.ensureBridge(context);
-		if (getUseTerminalViewSetting() && getRestoreOnReloadSetting()) {
+		if (getUseTerminalViewByDefaultSetting() && getRestoreOnReloadSetting()) {
 			void this.restore(context);
 		}
 

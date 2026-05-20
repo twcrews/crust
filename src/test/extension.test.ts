@@ -764,7 +764,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.strictEqual(properties?.['crust.markdown.allowRawHtml']?.default, false);
 		assert.strictEqual(properties?.['crust.pi.commandPath']?.default, 'pi');
 		assert.strictEqual(properties?.['crust.chat.includeIdeContextByDefault']?.default, false);
-		assert.strictEqual(properties?.['crust.chat.useTerminalView']?.default, false);
+		assert.strictEqual(properties?.['crust.chat.useTerminalViewByDefault']?.default, false);
 		assert.strictEqual(properties?.['crust.chat.lockEditorGroupOnOpen']?.default, true);
 		assert.strictEqual(properties?.['crust.pi.defaultModel']?.default, '');
 		assert.strictEqual(properties?.['crust.session.restoreOnReload']?.default, true);
