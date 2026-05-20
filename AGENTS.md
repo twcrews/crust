@@ -6,21 +6,22 @@ Guidance for coding agents working in this repository.
 
 Crust is a Visual Studio Code extension that provides a VS Code chat UI for the [Pi Coding Agent](https://pi.dev/). The goal remains feature parity with comparable coding-agent extensions, including session browsing, IDE context integration, slash/file autocomplete, rich rendering, and diff viewing.
 
-The project has a real implementation rather than only VS Code template code. The extension contributes `crust.openChat`, opens a locked side-by-side chat webview (also bound to `cmd+ctrl+escape` and the editor title menu), starts Pi with `pi --mode rpc`, streams assistant responses/thinking/tool activity, supports model selection and usage/status display, can browse/restore previous Pi JSONL sessions, starts new chats, runs supported slash commands (including manual `/compact` with custom instructions), and can attach current editor file/selection context to prompts. Multiple Crust webview instances can coexist and restored tabs are serialized with their session paths.
+The project has a real implementation rather than only VS Code template code. The extension contributes `crust.openChat`, opens a locked side-by-side chat webview (also bound to `cmd+ctrl+escape` and the editor title menu), starts Pi with `pi --mode rpc`, streams assistant responses/thinking/tool activity, supports model selection and usage/status display, can browse/restore previous Pi JSONL sessions, starts new chats, runs supported slash commands (including `/compact`, `/clone`, `/export`, `/session`, `/changelog`, emulated `/reload`, and `/quit`), and can attach current editor file/selection context to prompts. Multiple Crust webview instances can coexist and restored tabs are serialized with their session paths.
 
 ## Current architecture
 
 - `src/extension.ts` contains extension activation and command registration only.
-- `src/pi/piRpcClient.ts` owns the Pi RPC child process, JSONL request/response handling, event forwarding, supported RPC commands (`prompt`, `steer`, abort, model/session changes, compact, slash command discovery), and RPC logging.
+- `src/pi/piRpcClient.ts` owns the Pi RPC child process, JSONL request/response handling, event forwarding, supported RPC commands (`prompt`, `steer`, abort, model/session changes, compact, clone, HTML export, slash command discovery), and RPC logging.
 - `src/pi/rpcTypes.ts` contains lightweight runtime guards and shared Pi RPC types, including typed tool result/event shapes.
-- `src/ui/chatPanel.ts` coordinates each VS Code webview panel, Pi RPC client, session restore/new chat, model/status/usage updates, IDE context injection, slash commands, manual compaction display, `@` path autocomplete, task cancellation/steering, tool cards/diffs, and targeted model-connection error notifications.
+- `src/ui/chatPanel.ts` coordinates each VS Code webview panel, Pi RPC client, session restore/new chat, model/status/usage updates, IDE context injection, slash commands, manual compaction/export/reload/session flows, `@` path autocomplete, task cancellation/steering, tool cards/diffs, project file opening/link validation, settings refresh, and targeted model-connection error notifications.
 - `src/ui/streamingEventRenderer.ts`, `sessionRestoreRenderer.ts`, `conversationState.ts`, `slashCommands.ts`, and `chatPanelUtils.ts` contain the split-out rendering, session replay, conversation state, slash command, and panel utility logic that keeps `chatPanel.ts` focused.
 - `src/ui/chatTypes.ts`, `ideContext.ts`, `messageUtils.ts`, `pathAutocomplete.ts`, `sessionHistory.ts`, `toolUtils.ts`, and `usageStatus.ts` hold focused UI-side parsing, formatting, session, filesystem, and tool helpers.
-- `src/ui/chatWebview.ts` loads the static webview template and injects CSP nonce/resource URIs.
+- `src/ui/chatWebview.ts` loads the static webview template, reads contributed chat/markdown settings, and injects CSP nonce/resource URIs.
 - `src/utils/crustLogger.ts`, `errorMessage.ts`, and `nonce.ts` provide output-channel logging, error stringification, and CSP nonce generation.
-- `media/chatWebview.html` and the plain CSS/JavaScript files under `media/chatWebview/` implement the webview UI. The webview scripts are syntax-checked separately; they handle manual markdown rendering, expandable compaction summaries, copyable code blocks, inline diff rendering, slash and path autocomplete, IDE context toggling, persisted webview state, prompt history recall, cancellation shortcuts, empty states, conversation navigation, and logging back to the extension.
+- `src/webview/markdownRenderer.ts` builds the vendored `markdown-it` webview bundle used for rich Markdown rendering.
+- `media/chatWebview.html` and the plain CSS/JavaScript files under `media/chatWebview/` implement the webview UI. The webview scripts are syntax-checked separately; they handle markdown-it rendering, optional sanitized raw HTML, expandable compaction summaries, copyable code/tool-output blocks, project file links, inline diff rendering, slash and path autocomplete, IDE context toggling, persisted webview state, prompt history recall, cancellation shortcuts, empty states, conversation navigation, and logging back to the extension.
 - `branding/` contains extension and webview icons.
-- `src/test/extension.test.ts` contains the VS Code integration/unit test suite for RPC guards/client behavior, slash command fallbacks, webview message validation, chat panel helpers, streaming rendering, session restore rendering (including compaction summaries), IDE context, tool utilities, usage formatting, path autocomplete, session history, and static webview behavior.
+- `src/test/extension.test.ts` contains the VS Code integration/unit test suite for RPC guards/client behavior, slash command fallbacks and emulated commands, webview message validation, chat panel helpers, streaming rendering, session restore rendering (including compaction summaries), IDE context, tool utilities, usage formatting, path autocomplete, session history, settings, and static webview behavior.
 - `.github/workflows/ci.yml` runs CI validation; `.github/dependabot.yml` manages dependency update PRs.
 
 ## Working guidelines
@@ -29,9 +30,9 @@ The project has a real implementation rather than only VS Code template code. Th
 - Prefer small, focused changes with clear separation between extension activation, Pi integration, UI/webview code, and VS Code command registration.
 - Keep user-facing behavior aligned with VS Code extension conventions.
 - Assume Pi must be installed and available on `PATH`, as documented in `README.md`; some features also shell out to `git` or inspect the installed Pi CLI for built-in slash command metadata.
-- Avoid introducing framework or bundling complexity for the webview unless there is a clear need; the current webview assets are static files under `media/`.
+- Avoid introducing framework complexity for the webview unless there is a clear need; the current webview assets are static files under `media/`, with only the small markdown-it bundle generated by the existing esbuild workflow.
 - Preserve the RPC/webview boundary: extension code should talk to Pi, the filesystem, Git, and VS Code APIs, while the webview should handle DOM rendering and post typed messages back to the extension.
-- Keep restored sessions compatible with Pi JSONL history, including Crust's `<ide_context>` prompt wrapper and Pi skill wrapper stripping/display logic.
+- Keep restored sessions compatible with Pi JSONL history, including Crust's `<ide_context>` prompt wrapper, Pi skill wrapper stripping/display logic, and Crust's persisted webview state.
 
 ## Development commands
 
@@ -48,7 +49,7 @@ npm run check-webview
 
 ## Notes
 
-- Avoid adding large generated artifacts unless they are required by the extension packaging workflow.
+- Avoid adding large generated artifacts unless they are required by the extension packaging workflow; `media/chatWebview/generated/markdown-it.bundle.js` is intentionally generated and packaged.
 - Keep documentation updated as features move beyond the current implementation.
 - Logs are available in the `Crust` and `Crust Pi RPC` output channels when debugging extension/Pi behavior.
 - Keep model/provider error notifications targeted to explicit assistant errors and provider failure messages; avoid recursively scanning arbitrary event payloads because normal message text can otherwise trigger false-positive error toasts.
