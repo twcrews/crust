@@ -710,7 +710,8 @@ suite('Webview HTML and nonce generation', () => {
 		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
 
 		assert.match(source, /function upsertTool[\s\S]*toolName\.className = "tool-name";/);
-		assert.match(source, /header\.append\(toolName, document\.createTextNode\(path \+ formatToolStatus\(message\.status\)\)\);/);
+		assert.match(source, /header\.append\(toolName\);/);
+		assert.match(source, /appendProjectFileLinkedText\(header, path \+ formatToolStatus\(message\.status\)\);/);
 		assert.match(source, /header\.title = headerText;/);
 	});
 
