@@ -22,6 +22,80 @@ function getAllowRawHtmlSetting(): boolean {
 	return vscode.workspace.getConfiguration('crust.markdown').get<boolean>('allowRawHtml', false);
 }
 
+function formatSessionInfo(state: unknown, stats: unknown, currentModel: Model | undefined): string {
+	const stateRecord = asRecord(state);
+	const statsRecord = asRecord(stats);
+	const tokens = asRecord(statsRecord?.tokens);
+	const contextUsage = asRecord(statsRecord?.contextUsage);
+	const sessionPath = getString(statsRecord?.sessionFile) ?? getSessionPath(state);
+	const sessionName = getString(stateRecord?.sessionName);
+	const sessionId = getString(statsRecord?.sessionId) ?? getString(stateRecord?.sessionId);
+	const stateModel = stateRecord?.model;
+	const model = currentModel ?? (isModelLike(stateModel) ? stateModel : undefined);
+	const contextTokens = getNullableNumber(contextUsage?.tokens);
+	const contextWindow = getNumber(contextUsage?.contextWindow);
+	const contextPercent = getNullableNumber(contextUsage?.percent);
+	const lines = ['# Session', ''];
+
+	if (sessionName) {
+		lines.push(`- **Name:** ${sessionName}`);
+	}
+	if (sessionId) {
+		lines.push(`- **ID:** \`${sessionId}\``);
+	}
+	if (sessionPath) {
+		lines.push(`- **File:** \`${sessionPath}\``);
+	}
+	if (model) {
+		lines.push(`- **Model:** ${model.name || model.id} (${model.provider}/${model.id})`);
+	}
+
+	lines.push(`- **Messages:** ${formatInteger(getNumber(statsRecord?.totalMessages) ?? getNumber(stateRecord?.messageCount) ?? 0)} total (${formatInteger(getNumber(statsRecord?.userMessages) ?? 0)} user, ${formatInteger(getNumber(statsRecord?.assistantMessages) ?? 0)} assistant, ${formatInteger(getNumber(statsRecord?.toolResults) ?? 0)} tool results)`);
+	lines.push(`- **Tool calls:** ${formatInteger(getNumber(statsRecord?.toolCalls) ?? 0)}`);
+	lines.push(`- **Tokens:** ${formatInteger(getNumber(tokens?.total) ?? 0)} total (${formatInteger(getNumber(tokens?.input) ?? 0)} input, ${formatInteger(getNumber(tokens?.output) ?? 0)} output, ${formatInteger(getNumber(tokens?.cacheRead) ?? 0)} cache read, ${formatInteger(getNumber(tokens?.cacheWrite) ?? 0)} cache write)`);
+	if (contextWindow !== undefined) {
+		const used = contextTokens === null || contextTokens === undefined ? 'unknown' : formatInteger(contextTokens);
+		const percent = contextPercent === null || contextPercent === undefined ? '' : `, ${formatPercent(contextPercent)}`;
+		lines.push(`- **Context:** ${used} / ${formatInteger(contextWindow)} tokens${percent}`);
+	}
+	lines.push(`- **Cost:** ${formatCurrency(getNumber(statsRecord?.cost) ?? 0)}`);
+
+	return lines.join('\n');
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined;
+}
+
+function getString(value: unknown): string | undefined {
+	return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function getNumber(value: unknown): number | undefined {
+	return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function getNullableNumber(value: unknown): number | null | undefined {
+	return value === null ? null : getNumber(value);
+}
+
+function isModelLike(value: unknown): value is Model {
+	const record = asRecord(value);
+	return Boolean(record && typeof record.id === 'string' && typeof record.provider === 'string');
+}
+
+function formatInteger(value: number): string {
+	return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.round(value));
+}
+
+function formatPercent(value: number): string {
+	return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)}%`;
+}
+
+function formatCurrency(value: number): string {
+	return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
 export class CrustChatPanel implements vscode.Disposable {
 	private static readonly viewType = 'crustChat';
 	private readonly output = getCrustOutputChannel();
@@ -428,6 +502,9 @@ export class CrustChatPanel implements vscode.Disposable {
 				await this.client.setSessionName(args);
 				this.post({ type: 'sessionTitle', title: args || 'New Chat' });
 				return;
+			case 'session':
+				await this.showSessionInfo(commandText.trim() || '/session');
+				return;
 			case 'resume':
 				await this.showHistory();
 				return;
@@ -569,6 +646,21 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.post({ type: 'addMessage', id: createId('user'), role: 'user', text: '', slashCommandLabel: invocation });
 		const changelog = await getPiChangelogMarkdown((message, details, level) => this.log(message, details, level));
 		this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: `# What's New\n\n${changelog}`, secondary: true });
+	}
+
+	private async showSessionInfo(invocation: string): Promise<void> {
+		this.log('Showing session info');
+		if (!this.conversationState.hasSessionTitle) {
+			this.setSessionTitleFromPrompt(invocation);
+		}
+		this.post({ type: 'addMessage', id: createId('user'), role: 'user', text: '', slashCommandLabel: invocation });
+
+		try {
+			const [state, stats] = await Promise.all([this.client.getState(), this.client.getSessionStats()]);
+			this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: formatSessionInfo(state, stats, this.currentModel), secondary: true });
+		} catch (error) {
+			this.postError(errorMessage(error), { operation: 'showSessionInfo' });
+		}
 	}
 
 	private async compactSession(invocation: string, customInstructions: string | undefined): Promise<void> {

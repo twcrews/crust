@@ -180,7 +180,7 @@ suite('Slash commands', () => {
 		process.env.PATH = '';
 		try {
 			const commands = await getBuiltinSlashCommands(() => undefined);
-			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'clone', 'name', 'resume', 'model', 'copy', 'changelog', 'reload', 'quit']);
+			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'clone', 'name', 'session', 'resume', 'model', 'copy', 'changelog', 'reload', 'quit']);
 			assert.ok(commands.every((command) => command.source === 'builtin'));
 		} finally {
 			process.env.PATH = originalPath;
@@ -206,6 +206,7 @@ suite('Slash commands', () => {
 			{ name: 'new', source: 'builtin' },
 			{ name: 'clone', source: 'builtin' },
 			{ name: 'copy', source: 'builtin' },
+			{ name: 'session', source: 'builtin' },
 			{ name: 'changelog', source: 'builtin' },
 			{ name: 'reload', source: 'builtin' },
 			{ name: 'help', description: 'Show help', source: 'builtin' },
@@ -213,7 +214,7 @@ suite('Slash commands', () => {
 		], [
 			{ name: 'skill:fix', source: 'custom' },
 			{ name: 'project:review', source: 'custom' },
-		]).map((command) => command.name), ['new', 'clone', 'copy', 'changelog', 'reload', 'skill:fix', 'project:review', 'help', 'doctor']);
+		]).map((command) => command.name), ['new', 'clone', 'copy', 'session', 'changelog', 'reload', 'skill:fix', 'project:review', 'help', 'doctor']);
 	});
 
 	test('returns fallback text when Pi changelog cannot be loaded', async () => {
