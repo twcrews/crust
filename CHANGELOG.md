@@ -4,6 +4,12 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.8.1] - 2026-05-20
+
+- Fixed Markdown-rendered file references so user prompt links resolve to Crust project file links when the referenced file exists.
+- Improved user prompt link styling and expanded static webview tests for file-reference link conversion.
+- Updated agent guidance for current project file link behavior.
+
 ## [0.8.0] - 2026-05-20
 
 - Added support for `/clone`, `/export`, `/session`, `/changelog`, emulated `/reload`, and `/quit` slash commands.
@@ -93,6 +99,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.8.1]: https://github.com/twcrews/crust/compare/0.8.0...0.8.1
 [0.8.0]: https://github.com/twcrews/crust/compare/0.7.0...0.8.0
 [0.7.0]: https://github.com/twcrews/crust/compare/0.6.2...0.7.0
 [0.6.2]: https://github.com/twcrews/crust/compare/0.6.1...0.6.2
