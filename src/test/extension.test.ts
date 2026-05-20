@@ -258,8 +258,8 @@ suite('Slash commands', () => {
 
 suite('Webview message parsing', () => {
 	test('accepts known webview messages and normalizes optional fields', () => {
-		assert.deepStrictEqual(parseWebviewMessage({ type: 'submit', text: 'hello' }), { type: 'submit', text: 'hello', includeIdeContext: true });
-		assert.deepStrictEqual(parseWebviewMessage({ type: 'submit', text: 'hello', includeIdeContext: false }), { type: 'submit', text: 'hello', includeIdeContext: false });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'submit', text: 'hello' }), { type: 'submit', text: 'hello', includeIdeContext: false });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'submit', text: 'hello', includeIdeContext: true }), { type: 'submit', text: 'hello', includeIdeContext: true });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'selectModel' }), { type: 'selectModel', modelKey: undefined });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'debug' }), { type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'info' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'failed', level: 'error' }), { type: 'webviewLog', message: 'failed', details: undefined, level: 'error' });
@@ -716,6 +716,7 @@ suite('Webview HTML and nonce generation', () => {
 
 		assert.match(mainSource, /function parseExtensionMessage\(value\) \{[\s\S]*typeof value\.type !== "string"[\s\S]*return null;/);
 		assert.match(mainSource, /case "markdownSettings":[\s\S]*allowRawHtml: value\.allowRawHtml === true/);
+		assert.match(mainSource, /case "chatSettings":[\s\S]*includeIdeContextByDefault: value\.includeIdeContextByDefault === true/);
 		assert.match(mainSource, /const message = parseExtensionMessage\(event\.data\);[\s\S]*Ignored invalid extension message[\s\S]*"warn"/);
 		assert.match(loggingSource, /function logWebview\(message, details, level = "info"\)/);
 		assert.match(loggingSource, /const consoleMethod = level === "error" \? console\.error : console\.warn;/);
@@ -751,10 +752,16 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(mainSource, /updatePersistedWebviewState\(\{ promptHistory \}\);/);
 	});
 
-	test('contributes the raw HTML markdown setting disabled by default', async () => {
+	test('contributes security-sensitive and startup settings with expected defaults', async () => {
 		const packageJson = JSON.parse(await readFile(resolve(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes?: { configuration?: { properties?: Record<string, { default?: unknown }> } } };
+		const properties = packageJson.contributes?.configuration?.properties;
 
-		assert.strictEqual(packageJson.contributes?.configuration?.properties?.['crust.markdown.allowRawHtml']?.default, false);
+		assert.strictEqual(properties?.['crust.markdown.allowRawHtml']?.default, false);
+		assert.strictEqual(properties?.['crust.pi.commandPath']?.default, 'pi');
+		assert.strictEqual(properties?.['crust.chat.includeIdeContextByDefault']?.default, false);
+		assert.strictEqual(properties?.['crust.chat.lockEditorGroupOnOpen']?.default, true);
+		assert.strictEqual(properties?.['crust.pi.defaultModel']?.default, '');
+		assert.strictEqual(properties?.['crust.session.restoreOnReload']?.default, true);
 	});
 
 	test('supports restoring persisted webview sessions after VS Code reloads', async () => {
@@ -768,7 +775,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.ok(packageJson.activationEvents?.includes('onWebviewPanel:crustChat'));
 		assert.match(extensionSource, /CrustChatPanel\.registerSerializer\(context\)/);
 		assert.match(panelSource, /registerWebviewPanelSerializer\(CrustChatPanel\.viewType/);
-		assert.match(panelSource, /deserializeWebviewPanel: async \(panel, state(?:: unknown)?\) => \{[\s\S]*new CrustChatPanel\(context, panel, sessionPath\);/);
+		assert.match(panelSource, /deserializeWebviewPanel: async \(panel, state(?:: unknown)?\) => \{[\s\S]*const shouldRestoreSession = getRestoreOnReloadSetting\(\);[\s\S]*new CrustChatPanel\(context, panel, sessionPath\);/);
 		assert.match(panelSource, /switchSession\(this\.restoredSessionPath\)/);
 		assert.match(panelSource, /const sessionPath = getSessionPath\(state\);[\s\S]*this\.post\(\{ type: 'sessionPath', sessionPath \}\);/);
 		assert.match(mainSource, /case "sessionPath":\s*updatePersistedWebviewState\(\{ sessionPath: message\.sessionPath \|\| undefined \}\);\s*break;/);
@@ -796,6 +803,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(source, /element\.innerHTML = window\.crustMarkdown\.render\(markdown\);/);
 		assert.match(source, /function enhanceRenderedMarkdown\(element\)[\s\S]*enhanceTaskListItems\(element\);[\s\S]*wrapCodeBlocks\(element\);[\s\S]*wrapTables\(element\);[\s\S]*hardenLinks\(element\);/);
 		assert.match(source, /function setMarkdownSettings\(settings\)[\s\S]*setAllowRawHtml\(settings\.allowRawHtml === true\)[\s\S]*querySelectorAll\("\[data-markdown\]"\)/);
+		assert.match(source, /function setChatSettings\(settings\)[\s\S]*includeIdeContextByDefault = settings\.includeIdeContextByDefault === true/);
 		assert.match(source, /checkbox\.className = "markdown-task-checkbox";/);
 		assert.match(source, /button\.className = "markdown-code-copy";/);
 		assert.match(source, /button\.setAttribute\("aria-label", "Copy code block"\);/);
@@ -818,7 +826,7 @@ suite('Webview HTML and nonce generation', () => {
 		const html = getChatWebviewHtml(extensionUri, webview);
 		assert.ok(html.includes('vscode-resource:'));
 		assert.ok(html.includes('chatWebview.base.css'));
-		assert.ok(html.includes('window.crustInitialSettings = {"allowRawHtml":false}'));
+		assert.ok(html.includes('window.crustInitialSettings = {"allowRawHtml":false,"includeIdeContextByDefault":false}'));
 		assert.ok(html.includes('generated/markdown-it.bundle.js'));
 		assert.ok(html.indexOf('generated/markdown-it.bundle.js') < html.indexOf('chatWebview.rendering.js'));
 		assert.ok(html.includes('chatWebview.main.js'));

@@ -7,7 +7,7 @@ The goal of Crust is to offer feature parity with existing similar extensions (l
 ## Features
 
 - **Session browser** — view and resume your past Pi agent sessions
-- **IDE file/selection context** — automatically attach the current file or highlighted code as context to your prompt
+- **IDE file/selection context** — optionally attach the current file or highlighted code as context to your prompt
 - **Command autocomplete with `/`** — discover and insert slash commands
 - **File autocomplete with `@`** — reference workspace files in your prompt without leaving the chat
 - **Rich markdown rendering** — responses render with full markdown: headings, tables, code blocks, and more
@@ -28,6 +28,17 @@ The goal of Crust is to offer feature parity with existing similar extensions (l
 Crust requires that Pi be installed and available in your `PATH`.
 
 Follow Pi's documentation to get started: https://pi.dev/docs/latest/quickstart
+
+## Settings
+
+Crust contributes VS Code settings under **Extensions › Crust**:
+
+- `crust.pi.commandPath` — command or absolute path used to start Pi. Defaults to `pi`.
+- `crust.pi.defaultModel` — preferred model key selected on startup. Leave empty to use Pi's current model.
+- `crust.chat.lockEditorGroupOnOpen` — lock the chat editor group after opening Crust. Defaults to `true`.
+- `crust.chat.includeIdeContextByDefault` — enable current editor file/selection context for new prompts by default. Defaults to `false` for security/privacy so Crust does not send IDE context unless you explicitly enable it in the chat UI or settings.
+- `crust.session.restoreOnReload` — restore serialized Crust chat tabs to their previous Pi session after a VS Code window reload. Defaults to `true`.
+- `crust.markdown.allowRawHtml` — allow sanitized raw HTML in rendered chat Markdown. Defaults to `false`.
 
 ## Limitations
 

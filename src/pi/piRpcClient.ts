@@ -21,7 +21,7 @@ export class PiRpcClient implements vscode.Disposable {
 	readonly onEvent = this.eventEmitter.event;
 	readonly onError = this.errorEmitter.event;
 
-	constructor(private readonly cwd: string | undefined) {}
+	constructor(private readonly cwd: string | undefined, private commandPath = 'pi') {}
 
 	async start(): Promise<void> {
 		if (this.process) {
@@ -32,14 +32,25 @@ export class PiRpcClient implements vscode.Disposable {
 	}
 
 	async restart(): Promise<void> {
-		this.log('Restarting Pi RPC process', { cwd: this.cwd });
+		this.log('Restarting Pi RPC process', { cwd: this.cwd, commandPath: this.commandPath });
 		await this.stopProcess();
 		this.spawnProcess();
 	}
 
+	async setCommandPath(commandPath: string): Promise<void> {
+		const nextCommandPath = commandPath.trim() || 'pi';
+		if (nextCommandPath === this.commandPath) {
+			return;
+		}
+		this.commandPath = nextCommandPath;
+		if (this.process) {
+			await this.restart();
+		}
+	}
+
 	private spawnProcess(): void {
-		this.log('Starting Pi RPC process', { cwd: this.cwd });
-		this.process = spawn('pi', ['--mode', 'rpc'], {
+		this.log('Starting Pi RPC process', { cwd: this.cwd, commandPath: this.commandPath });
+		this.process = spawn(this.commandPath, ['--mode', 'rpc'], {
 			cwd: this.cwd,
 			env: process.env,
 		});

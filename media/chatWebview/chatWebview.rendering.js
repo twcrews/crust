@@ -275,6 +275,14 @@ function setMarkdownSettings(settings) {
 	}
 }
 
+function setChatSettings(settings) {
+	includeIdeContextByDefault = settings.includeIdeContextByDefault === true;
+	if (!currentIdeContextLabel) {
+		ideContextEnabled = includeIdeContextByDefault;
+		updateIdeContextButtonState();
+	}
+}
+
 function renderMarkdown(element, markdown) {
 	element.textContent = "";
 	if (!window.crustMarkdown || typeof window.crustMarkdown.render !== "function") {
@@ -539,7 +547,7 @@ function setIdeContext(label) {
 	ideContext.title = label ? "Toggle IDE context: " + label : "Use IDE context";
 	ideContext.classList.toggle("hidden", !label);
 	if (!label || label !== currentIdeContextLabel) {
-		ideContextEnabled = true;
+		ideContextEnabled = includeIdeContextByDefault;
 	}
 	currentIdeContextLabel = label;
 	updateIdeContextButtonState();

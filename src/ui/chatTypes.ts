@@ -25,7 +25,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
 	switch (message.type) {
 		case 'submit':
 			return typeof message.text === 'string'
-				? { type: 'submit', text: message.text, includeIdeContext: message.includeIdeContext !== false }
+				? { type: 'submit', text: message.text, includeIdeContext: message.includeIdeContext === true }
 				: undefined;
 		case 'steer':
 			return typeof message.text === 'string' ? { type: 'steer', text: message.text } : undefined;

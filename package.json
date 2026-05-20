@@ -51,6 +51,31 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Allow raw HTML in chat Markdown. When disabled, HTML is shown as text. When enabled, HTML is sanitized before rendering."
+        },
+        "crust.pi.commandPath": {
+          "type": "string",
+          "default": "pi",
+          "markdownDescription": "Command or absolute path used to start the Pi Coding Agent RPC process."
+        },
+        "crust.chat.includeIdeContextByDefault": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable current editor file/selection context for new prompts by default. Disabled by default to avoid sending IDE context unless explicitly enabled."
+        },
+        "crust.chat.lockEditorGroupOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Lock the Crust chat editor group after opening the chat beside the current editor."
+        },
+        "crust.pi.defaultModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Preferred model key to select when Crust starts, using the format shown in the model picker, for example `provider:model-id`. Leave empty to use Pi's current model."
+        },
+        "crust.session.restoreOnReload": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Restore serialized Crust chat tabs to their previous Pi session after a VS Code window reload. When disabled, restored tabs start from Pi's current session instead."
         }
       }
     }

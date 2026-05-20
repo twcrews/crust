@@ -9,7 +9,7 @@ import { parseWebviewMessage, type SessionInfo } from './chatTypes';
 import { getChatWebviewHtml } from './chatWebview';
 import { buildPromptWithIdeContext, getIdeContext } from './ideContext';
 import { getMessageRole, getMessageText } from './messageUtils';
-import { createId, formatErrorForChat, formatSessionDate, getAbortMessage, getInitialCwd, getLastModelFromSessionText, getModelContextWindow, getSessionPath, getWorkspaceStatus, hasMessageUsage, isAbortedAssistantMessage, modelKey, truncate } from './chatPanelUtils';
+import { createId, formatErrorForChat, formatSessionDate, getAbortMessage, getInitialCwd, getLastModelFromSessionText, getModelContextWindow, getPostLogDetails, getSessionPath, getWorkspaceStatus, hasMessageUsage, isAbortedAssistantMessage, modelKey, truncate } from './chatPanelUtils';
 import { createConversationState, resetStreamingState, type ConversationState } from './conversationState';
 import { getPathSuggestions } from './pathAutocomplete';
 import { listSessions } from './sessionHistory';
@@ -20,6 +20,27 @@ import { formatUsageStatus } from './usageStatus';
 
 function getAllowRawHtmlSetting(): boolean {
 	return vscode.workspace.getConfiguration('crust.markdown').get<boolean>('allowRawHtml', false);
+}
+
+function getPiCommandPathSetting(): string {
+	return vscode.workspace.getConfiguration('crust.pi').get<string>('commandPath', 'pi').trim() || 'pi';
+}
+
+function getIncludeIdeContextByDefaultSetting(): boolean {
+	return vscode.workspace.getConfiguration('crust.chat').get<boolean>('includeIdeContextByDefault', false);
+}
+
+function getLockEditorGroupOnOpenSetting(): boolean {
+	return vscode.workspace.getConfiguration('crust.chat').get<boolean>('lockEditorGroupOnOpen', true);
+}
+
+function getDefaultModelSetting(): string | undefined {
+	const value = vscode.workspace.getConfiguration('crust.pi').get<string>('defaultModel', '').trim();
+	return value || undefined;
+}
+
+function getRestoreOnReloadSetting(): boolean {
+	return vscode.workspace.getConfiguration('crust.session').get<boolean>('restoreOnReload', true);
 }
 
 function formatSessionInfo(state: unknown, stats: unknown, currentModel: Model | undefined): string {
@@ -131,6 +152,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	private sessionWatcher: FSWatcher | undefined;
 	private sessionWatcherTimer: NodeJS.Timeout | undefined;
 	private allowRawHtml = getAllowRawHtmlSetting();
+	private includeIdeContextByDefault = getIncludeIdeContextByDefaultSetting();
 
 	static show(context: vscode.ExtensionContext): void {
 		void CrustChatPanel.open(context);
@@ -140,7 +162,8 @@ export class CrustChatPanel implements vscode.Disposable {
 		return vscode.window.registerWebviewPanelSerializer(CrustChatPanel.viewType, {
 			deserializeWebviewPanel: async (panel, state: unknown) => {
 				panel.webview.options = { enableScripts: true };
-				const sessionPath = typeof (state as { sessionPath?: unknown } | undefined)?.sessionPath === 'string'
+				const shouldRestoreSession = getRestoreOnReloadSetting();
+				const sessionPath = shouldRestoreSession && typeof (state as { sessionPath?: unknown } | undefined)?.sessionPath === 'string'
 					? (state as { sessionPath: string }).sessionPath
 					: undefined;
 				new CrustChatPanel(context, panel, sessionPath);
@@ -157,7 +180,9 @@ export class CrustChatPanel implements vscode.Disposable {
 		);
 
 		const chatPanel = new CrustChatPanel(context, panel);
-		await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
+		if (getLockEditorGroupOnOpenSetting()) {
+			await vscode.commands.executeCommand('workbench.action.lockEditorGroup');
+		}
 		chatPanel.focusPrompt();
 	}
 
@@ -167,10 +192,10 @@ export class CrustChatPanel implements vscode.Disposable {
 		private readonly restoredSessionPath?: string,
 	) {
 		this.cwd = getInitialCwd();
-		this.client = new PiRpcClient(this.cwd);
+		this.client = new PiRpcClient(this.cwd, getPiCommandPathSetting());
 		this.log('Creating chat panel', { cwd: this.cwd });
 		this.panel.iconPath = this.getIconPath();
-		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview, { allowRawHtml: this.allowRawHtml });
+		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview, { allowRawHtml: this.allowRawHtml, includeIdeContextByDefault: this.includeIdeContextByDefault });
 
 		this.disposables.push(
 			this.panel.onDidDispose(() => this.dispose()),
@@ -205,6 +230,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private async initialize(): Promise<void> {
 		this.postMarkdownSettings();
+		this.postChatSettings();
 		this.postIdeContext();
 		try {
 			this.log('Initializing Pi RPC client');
@@ -232,7 +258,8 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.builtinSlashCommands = builtinCommands;
 			const currentModel = (state as { model?: Model | null } | undefined)?.model;
 			this.currentModel = currentModel ?? undefined;
-			this.contextWindow = getModelContextWindow(currentModel);
+			await this.applyDefaultModelSetting();
+			this.contextWindow = getModelContextWindow(this.currentModel);
 			const sessionPath = getSessionPath(state);
 			this.post({ type: 'sessionPath', sessionPath });
 			this.watchSessionFile(sessionPath);
@@ -940,12 +967,29 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 
+		await this.selectModelCandidate(model, 'selectModel');
+	}
+
+	private async applyDefaultModelSetting(): Promise<void> {
+		const defaultModelKey = getDefaultModelSetting();
+		if (!defaultModelKey || this.currentModel && modelKey(this.currentModel) === defaultModelKey) {
+			return;
+		}
+		const model = this.models.find((candidate) => modelKey(candidate) === defaultModelKey);
+		if (!model) {
+			this.log('Configured default model is unavailable', { defaultModelKey }, 'warn');
+			return;
+		}
+		await this.selectModelCandidate(model, 'applyDefaultModel');
+	}
+
+	private async selectModelCandidate(model: Model, operation: string): Promise<void> {
 		try {
 			await this.client.setModel(model);
 			this.setCurrentModel(model);
 			await this.postSessionStatus(await this.client.getMessages());
 		} catch (error) {
-			this.postError(errorMessage(error), { operation: 'selectModel' });
+			this.postError(errorMessage(error), { operation });
 		}
 	}
 	private handlePiEvent(event: RpcEvent): void {
@@ -1005,18 +1049,35 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private handleConfigurationChange(event: vscode.ConfigurationChangeEvent): void {
-		if (!event.affectsConfiguration('crust.markdown.allowRawHtml')) {
-			return;
+		if (event.affectsConfiguration('crust.markdown.allowRawHtml')) {
+			this.allowRawHtml = getAllowRawHtmlSetting();
+			this.postMarkdownSettings();
 		}
-		this.allowRawHtml = getAllowRawHtmlSetting();
-		this.postMarkdownSettings();
+		if (event.affectsConfiguration('crust.chat.includeIdeContextByDefault')) {
+			this.includeIdeContextByDefault = getIncludeIdeContextByDefaultSetting();
+			this.postChatSettings();
+		}
+		if (event.affectsConfiguration('crust.pi.commandPath')) {
+			void this.client.setCommandPath(getPiCommandPathSetting()).then(
+				() => this.post({ type: 'status', message: 'Pi command path updated.' }),
+				(error: unknown) => this.postError(errorMessage(error), { operation: 'setCommandPath' }),
+			);
+		}
+		if (event.affectsConfiguration('crust.pi.defaultModel')) {
+			void this.applyDefaultModelSetting();
+		}
 	}
 
 	private postMarkdownSettings(): void {
 		this.post({ type: 'markdownSettings', allowRawHtml: this.allowRawHtml });
 	}
 
+	private postChatSettings(): void {
+		this.post({ type: 'chatSettings', includeIdeContextByDefault: this.includeIdeContextByDefault });
+	}
+
 	private post(message: unknown): void {
+		this.log('Posting webview message', getPostLogDetails(message));
 		void this.panel.webview.postMessage(message);
 	}
 

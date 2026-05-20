@@ -240,6 +240,8 @@ function parseExtensionMessage(value) {
 			return { type: value.type };
 		case "markdownSettings":
 			return { type: "markdownSettings", allowRawHtml: value.allowRawHtml === true };
+		case "chatSettings":
+			return { type: "chatSettings", includeIdeContextByDefault: value.includeIdeContextByDefault === true };
 		case "pathAutocomplete":
 			return typeof value.requestId === "number" ? { type: "pathAutocomplete", requestId: value.requestId, suggestions: arrayValue(value.suggestions) } : null;
 		case "status":
@@ -284,6 +286,9 @@ window.addEventListener("message", (event) => {
 			break;
 		case "markdownSettings":
 			setMarkdownSettings({ allowRawHtml: message.allowRawHtml === true });
+			break;
+		case "chatSettings":
+			setChatSettings({ includeIdeContextByDefault: message.includeIdeContextByDefault === true });
 			break;
 		case "focusModel":
 			model.focus();
