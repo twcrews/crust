@@ -421,6 +421,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			case 'compact':
 				await this.compactSession(commandText.trim() || '/compact', args || undefined);
 				return;
+			case 'clone':
+				await this.cloneSession(commandText.trim() || '/clone');
+				return;
 			case 'name':
 				await this.client.setSessionName(args);
 				this.post({ type: 'sessionTitle', title: args || 'New Chat' });
@@ -496,6 +499,42 @@ export class CrustChatPanel implements vscode.Disposable {
 		} finally {
 			this.setProcessing(false);
 			resetStreamingState(this.conversationState);
+		}
+	}
+
+	private async cloneSession(invocation: string): Promise<void> {
+		if (this.conversationState.isProcessing || this.conversationState.isStreaming) {
+			void vscode.window.showInformationMessage('Wait for the current response to finish before cloning the session.');
+			return;
+		}
+
+		this.log('Cloning current session');
+		if (!this.conversationState.hasSessionTitle) {
+			this.setSessionTitleFromPrompt(invocation);
+		}
+		this.post({ type: 'addMessage', id: createId('user'), role: 'user', text: '', slashCommandLabel: invocation });
+		this.setProcessing(true);
+		this.post({ type: 'status', message: 'Cloning session...' });
+
+		try {
+			const cloned = await this.client.clone();
+			if (!cloned) {
+				this.post({ type: 'status', message: 'Clone cancelled.' });
+				return;
+			}
+
+			this.resetConversationState();
+			this.post({ type: 'clearMessages' });
+			const messages = await this.client.getMessages();
+			await this.restoreMessages(messages);
+			await this.postCurrentSessionPath();
+			this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: 'Cloned to new session.', secondary: true });
+			void this.refreshCurrentModel();
+			void this.refreshSlashCommands();
+		} catch (error) {
+			this.postError(errorMessage(error), { operation: 'cloneSession' });
+		} finally {
+			this.setProcessing(false);
 		}
 	}
 

@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 
 type LogFn = (message: string, details?: unknown, level?: CrustLogLevel) => void;
 
-const supportedBuiltinSlashCommandNames = new Set(['new', 'compact', 'name', 'resume', 'model', 'copy', 'quit', 'changelog', 'reload']);
+const supportedBuiltinSlashCommandNames = new Set(['new', 'compact', 'clone', 'name', 'resume', 'model', 'copy', 'quit', 'changelog', 'reload']);
 
 export function isSupportedBuiltinSlashCommand(commandName: string): boolean {
 	return supportedBuiltinSlashCommandNames.has(commandName);
@@ -106,6 +106,7 @@ async function getPiCliPath(): Promise<string> {
 const fallbackCommands: SlashCommand[] = [
 	{ name: 'new', description: 'Start a new session', source: 'builtin' },
 	{ name: 'compact', description: 'Manually compact context, optional custom instructions', source: 'builtin' },
+	{ name: 'clone', description: 'Duplicate the current session at the current position', source: 'builtin' },
 	{ name: 'name', description: 'Set the session name', source: 'builtin' },
 	{ name: 'resume', description: 'Resume a previous session', source: 'builtin' },
 	{ name: 'model', description: 'Select model', source: 'builtin' },

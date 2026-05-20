@@ -145,6 +145,33 @@ suite('Pi RPC client', () => {
 		assert.deepStrictEqual(result, { summary: 'Kept important context', tokensBefore: 12345 });
 		assert.deepStrictEqual(sent, [{ id: (sent[0] as { id: string }).id, type: 'compact', customInstructions: 'focus on tests' }]);
 	});
+
+	test('returns clone cancellation state from Pi RPC', async () => {
+		type TestableClient = {
+			start: () => Promise<void>;
+			process?: { stdin: { write: (payload: string, callback: (error?: Error) => void) => void } };
+			handleStdout: (chunk: string) => void;
+		};
+
+		const client = new PiRpcClient(undefined);
+		const testable = client as unknown as TestableClient;
+		const sentTypes: string[] = [];
+		testable.start = async () => {
+			testable.process = {
+				stdin: {
+					write: (payload, callback) => {
+						const command = JSON.parse(payload) as { id: string; type: string };
+						sentTypes.push(command.type);
+						callback();
+						testable.handleStdout(`${JSON.stringify({ type: 'response', id: command.id, command: command.type, success: true, data: { cancelled: true } })}\n`);
+					},
+				},
+			};
+		};
+
+		assert.strictEqual(await client.clone(), false);
+		assert.deepStrictEqual(sentTypes, ['clone']);
+	});
 });
 
 suite('Slash commands', () => {
@@ -153,7 +180,7 @@ suite('Slash commands', () => {
 		process.env.PATH = '';
 		try {
 			const commands = await getBuiltinSlashCommands(() => undefined);
-			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'name', 'resume', 'model', 'copy', 'changelog', 'reload', 'quit']);
+			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'clone', 'name', 'resume', 'model', 'copy', 'changelog', 'reload', 'quit']);
 			assert.ok(commands.every((command) => command.source === 'builtin'));
 		} finally {
 			process.env.PATH = originalPath;
@@ -163,18 +190,21 @@ suite('Slash commands', () => {
 	test('marks unsupported built-in slash commands disabled and orders them last', () => {
 		const commands = markUnsupportedBuiltinSlashCommands([
 			{ name: 'compact', description: 'Compact context', source: 'builtin' },
+			{ name: 'clone', description: 'Clone session', source: 'builtin' },
 			{ name: 'help', description: 'Show help', source: 'builtin' },
 			{ name: 'project:fix', description: 'Fix', source: 'custom' },
 		]);
 
 		assert.deepStrictEqual(commands, [
 			{ name: 'compact', description: 'Compact context', source: 'builtin' },
+			{ name: 'clone', description: 'Clone session', source: 'builtin' },
 			{ name: 'help', description: 'not supported yet', source: 'builtin', disabled: true },
 			{ name: 'project:fix', description: 'Fix', source: 'custom' },
 		]);
 
 		assert.deepStrictEqual(orderSlashCommands([
 			{ name: 'new', source: 'builtin' },
+			{ name: 'clone', source: 'builtin' },
 			{ name: 'copy', source: 'builtin' },
 			{ name: 'changelog', source: 'builtin' },
 			{ name: 'reload', source: 'builtin' },
@@ -183,7 +213,7 @@ suite('Slash commands', () => {
 		], [
 			{ name: 'skill:fix', source: 'custom' },
 			{ name: 'project:review', source: 'custom' },
-		]).map((command) => command.name), ['new', 'copy', 'changelog', 'reload', 'skill:fix', 'project:review', 'help', 'doctor']);
+		]).map((command) => command.name), ['new', 'clone', 'copy', 'changelog', 'reload', 'skill:fix', 'project:review', 'help', 'doctor']);
 	});
 
 	test('returns fallback text when Pi changelog cannot be loaded', async () => {
