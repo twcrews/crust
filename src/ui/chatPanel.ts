@@ -8,7 +8,7 @@ import { errorMessage } from '../utils/errorMessage';
 import { parseWebviewMessage, type SessionInfo } from './chatTypes';
 import { getChatWebviewHtml } from './chatWebview';
 import { buildPromptWithIdeContext, getIdeContext } from './ideContext';
-import { getMessageRole } from './messageUtils';
+import { getMessageRole, getMessageText } from './messageUtils';
 import { createId, formatErrorForChat, formatSessionDate, getAbortMessage, getInitialCwd, getLastModelFromSessionText, getModelContextWindow, getSessionPath, getWorkspaceStatus, hasMessageUsage, isAbortedAssistantMessage, modelKey, truncate } from './chatPanelUtils';
 import { createConversationState, resetStreamingState, type ConversationState } from './conversationState';
 import { getPathSuggestions } from './pathAutocomplete';
@@ -431,13 +431,95 @@ export class CrustChatPanel implements vscode.Disposable {
 			case 'model':
 				this.post({ type: 'focusModel' });
 				return;
+			case 'copy':
+				await this.copyLastAssistantMessage(commandText.trim() || '/copy');
+				return;
 			case 'changelog':
 				await this.showChangelog(commandText.trim() || '/changelog');
+				return;
+			case 'reload':
+				await this.reloadPiResources(commandText.trim() || '/reload');
 				return;
 			case 'quit':
 				this.panel.dispose();
 				return;
 		}
+	}
+
+	private async reloadPiResources(invocation: string): Promise<void> {
+		if (this.conversationState.isProcessing || this.conversationState.isStreaming) {
+			void vscode.window.showInformationMessage('Wait for the current response to finish before reloading Pi resources.');
+			return;
+		}
+
+		this.log('Reloading Pi resources by restarting RPC process');
+		if (!this.conversationState.hasSessionTitle) {
+			this.setSessionTitleFromPrompt(invocation);
+		}
+
+		const sessionPath = this.activeSessionPath;
+		this.conversationState.activeLoadingMessageId = createId('loading');
+		this.conversationState.activeTextMessageIds.clear();
+		this.conversationState.activeAbortIndicatorShown = false;
+		this.conversationState.activeErrorMessageShown = false;
+		this.post({ type: 'addMessage', id: createId('user'), role: 'user', text: '', slashCommandLabel: invocation });
+		this.post({ type: 'addMessage', id: this.conversationState.activeLoadingMessageId, role: 'assistant', text: '', loading: true });
+		this.setProcessing(true);
+		this.post({ type: 'status', message: 'Reloading Pi resources...' });
+
+		try {
+			await this.client.restart();
+			const [models, state, commands, builtinCommands] = await Promise.all([
+				this.client.getAvailableModels(),
+				this.client.getState(),
+				this.client.getCommands(),
+				getBuiltinSlashCommands((message, details, level) => this.log(message, details, level)),
+			]);
+			let currentState = state;
+			if (sessionPath && getSessionPath(state) !== sessionPath && await this.client.switchSession(sessionPath)) {
+				currentState = await this.client.getState();
+			}
+			this.models = models;
+			this.piSlashCommands = commands;
+			this.builtinSlashCommands = builtinCommands;
+			this.setCurrentModel((currentState as { model?: Model | null } | undefined)?.model ?? undefined);
+			const currentSessionPath = getSessionPath(currentState);
+			this.post({ type: 'sessionPath', sessionPath: currentSessionPath });
+			this.watchSessionFile(currentSessionPath);
+			this.postSlashCommands();
+			await this.postSessionStatus(await this.client.getMessages());
+			this.removeActiveLoadingMessage();
+			this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: 'Reloaded Pi resources.', secondary: true });
+		} catch (error) {
+			this.removeActiveLoadingMessage();
+			this.postError(errorMessage(error), { operation: 'reloadPiResources' });
+		} finally {
+			this.setProcessing(false);
+			resetStreamingState(this.conversationState);
+		}
+	}
+
+	private async copyLastAssistantMessage(invocation: string): Promise<void> {
+		this.log('Copying last assistant message');
+		if (!this.conversationState.hasSessionTitle) {
+			this.setSessionTitleFromPrompt(invocation);
+		}
+		this.post({ type: 'addMessage', id: createId('user'), role: 'user', text: '', slashCommandLabel: invocation });
+
+		const messages = await this.client.getMessages();
+		const text = messages
+			.slice()
+			.reverse()
+			.map((message) => getMessageRole(message) === 'assistant' ? getMessageText(message) : '')
+			.find((candidate) => candidate.trim().length > 0);
+
+		if (!text) {
+			this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: 'No agent message to copy.', secondary: true });
+			return;
+		}
+
+		await vscode.env.clipboard.writeText(text);
+		this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: 'Copied last agent message to clipboard.', secondary: true });
 	}
 
 	private async showChangelog(invocation: string): Promise<void> {

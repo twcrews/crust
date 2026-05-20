@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 
 type LogFn = (message: string, details?: unknown, level?: CrustLogLevel) => void;
 
-const supportedBuiltinSlashCommandNames = new Set(['new', 'compact', 'name', 'resume', 'model', 'quit', 'changelog']);
+const supportedBuiltinSlashCommandNames = new Set(['new', 'compact', 'name', 'resume', 'model', 'copy', 'quit', 'changelog', 'reload']);
 
 export function isSupportedBuiltinSlashCommand(commandName: string): boolean {
 	return supportedBuiltinSlashCommandNames.has(commandName);
@@ -109,6 +109,8 @@ const fallbackCommands: SlashCommand[] = [
 	{ name: 'name', description: 'Set the session name', source: 'builtin' },
 	{ name: 'resume', description: 'Resume a previous session', source: 'builtin' },
 	{ name: 'model', description: 'Select model', source: 'builtin' },
+	{ name: 'copy', description: 'Copy last agent message to clipboard', source: 'builtin' },
 	{ name: 'changelog', description: 'Show changelog entries', source: 'builtin' },
+	{ name: 'reload', description: 'Reload Pi resources by restarting the Pi RPC process', source: 'builtin' },
 	{ name: 'quit', description: 'Close the Crust tab', source: 'builtin' },
 ];

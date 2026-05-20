@@ -28,6 +28,16 @@ export class PiRpcClient implements vscode.Disposable {
 			return;
 		}
 
+		this.spawnProcess();
+	}
+
+	async restart(): Promise<void> {
+		this.log('Restarting Pi RPC process', { cwd: this.cwd });
+		await this.stopProcess();
+		this.spawnProcess();
+	}
+
+	private spawnProcess(): void {
 		this.log('Starting Pi RPC process', { cwd: this.cwd });
 		this.process = spawn('pi', ['--mode', 'rpc'], {
 			cwd: this.cwd,
@@ -48,7 +58,9 @@ export class PiRpcClient implements vscode.Disposable {
 		});
 		this.process.on('exit', (code, signal) => {
 			this.log('Pi RPC process exited', { code, signal }, code === 0 ? 'info' : 'error');
-			this.errorEmitter.fire(`Pi exited${code === null ? '' : ` with code ${code}`}${signal ? ` (${signal})` : ''}.`);
+			if (this.process) {
+				this.errorEmitter.fire(`Pi exited${code === null ? '' : ` with code ${code}`}${signal ? ` (${signal})` : ''}.`);
+			}
 			this.process = undefined;
 			this.failAll(new Error('Pi RPC process exited.'));
 		});
@@ -120,6 +132,20 @@ export class PiRpcClient implements vscode.Disposable {
 		this.failAll(new Error('Pi RPC client disposed.'));
 		this.process?.kill();
 		this.process = undefined;
+	}
+
+	private async stopProcess(): Promise<void> {
+		const process = this.process;
+		if (!process) {
+			return;
+		}
+		this.process = undefined;
+		this.buffer = '';
+		this.failAll(new Error('Pi RPC process restarted.'));
+		await new Promise<void>((resolve) => {
+			process.once('exit', () => resolve());
+			process.kill();
+		});
 	}
 
 	private async send(command: Record<string, unknown>): Promise<RpcResponse> {

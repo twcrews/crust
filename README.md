@@ -29,6 +29,10 @@ Crust requires that Pi be installed and available in your `PATH`.
 
 Follow Pi's documentation to get started: https://pi.dev/docs/latest/quickstart
 
+## Limitations
+
+- **`/reload` is emulated** — Pi's TUI has a built-in `/reload` command for reloading keybindings, extensions, skills, prompts, and themes. Pi RPC mode does not currently expose that command directly, so Crust emulates it by restarting its `pi --mode rpc` child process, restoring the active session, and refreshing models and slash commands. This reloads Pi-side resources without reloading the VS Code extension host; changes to Crust's own extension code or VS Code contributions still require the normal VS Code extension reload workflow.
+
 ## Contributing
 
 Feel free to submit issues or open pull requests with features and bug fixes on GitHub!
