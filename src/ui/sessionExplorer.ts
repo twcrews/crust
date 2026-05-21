@@ -44,6 +44,7 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 	private sessionDirectoryWatcher: vscode.FileSystemWatcher | undefined;
 	private refreshTimer: NodeJS.Timeout | undefined;
 	private watchedSessionDirectory: string | undefined;
+	private webviewHtmlInitialized = false;
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -76,6 +77,7 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
 		this.view = webviewView;
+		this.webviewHtmlInitialized = false;
 		webviewView.webview.options = { enableScripts: true };
 		this.disposables.push(
 			webviewView.webview.onDidReceiveMessage((message: unknown) => this.handleMessage(message)),
@@ -125,20 +127,25 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 		void this.refresh();
 	}
 
-	scheduleRefresh(delay = 250): void {
+	scheduleRefresh(delay = 500): void {
 		if (this.refreshTimer) {
 			clearTimeout(this.refreshTimer);
 		}
 		this.refreshTimer = setTimeout(() => {
 			this.refreshTimer = undefined;
+			if (this.view && !this.view.visible) {
+				return;
+			}
 			void this.refresh();
 		}, delay);
 	}
 
 	async refresh(): Promise<void> {
 		this.watchSessionDirectory();
-		this.loading = true;
-		this.render();
+		if (!this.sessions.length) {
+			this.loading = true;
+			this.render();
+		}
 		try {
 			this.sessions = await listSessionsForCwd(getInitialCwd());
 		} catch (error) {
@@ -165,7 +172,7 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 		this.sessionDirectoryWatcher = watcher;
 		this.disposables.push(
 			watcher.onDidCreate(() => this.scheduleRefresh()),
-			watcher.onDidChange(() => this.scheduleRefresh()),
+			watcher.onDidChange(() => this.scheduleRefresh(1500)),
 			watcher.onDidDelete(() => this.scheduleRefresh()),
 		);
 	}
@@ -200,12 +207,17 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 		if (!this.view) {
 			return;
 		}
-		this.view.webview.html = this.getHtml(this.view.webview);
+		const content = this.getContentHtml();
+		if (!this.webviewHtmlInitialized) {
+			this.view.webview.html = this.getHtml(this.view.webview, content);
+			this.webviewHtmlInitialized = true;
+			return;
+		}
+		void this.view.webview.postMessage({ type: 'sessionsHtml', html: content });
 	}
 
-	private getHtml(webview: vscode.Webview): string {
+	private getHtml(webview: vscode.Webview, content: string): string {
 		const nonce = getNonce();
-		const content = this.getContentHtml();
 		return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -231,8 +243,20 @@ export class CrustSessionExplorer implements vscode.WebviewViewProvider, vscode.
 	<div id="sessions">${content}</div>
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
-		document.querySelectorAll('.session[data-path]').forEach((button) => {
-			button.addEventListener('click', () => vscode.postMessage({ type: 'openSession', path: button.dataset.path }));
+		const sessions = document.getElementById('sessions');
+		function attachSessionListeners() {
+			document.querySelectorAll('.session[data-path]').forEach((button) => {
+				button.addEventListener('click', () => vscode.postMessage({ type: 'openSession', path: button.dataset.path }));
+			});
+		}
+		attachSessionListeners();
+		window.addEventListener('message', (event) => {
+			const message = event.data;
+			if (!message || message.type !== 'sessionsHtml' || typeof message.html !== 'string') {
+				return;
+			}
+			sessions.innerHTML = message.html;
+			attachSessionListeners();
 		});
 	</script>
 </body>
