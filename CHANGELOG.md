@@ -4,6 +4,12 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.9.1] - 2026-05-20
+
+- Fixed session explorer refreshes to update content without recreating the webview, reducing flicker while sessions change.
+- Improved session explorer filesystem refresh debouncing and skipped hidden-view refreshes.
+- Expanded tests and agent guidance for the session explorer anti-flicker behavior.
+
 ## [0.9.0] - 2026-05-20
 
 - Added a Crust activity-bar session explorer for browsing, refreshing, opening, and starting Pi sessions.
@@ -108,6 +114,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.9.1]: https://github.com/twcrews/crust/compare/0.9.0...0.9.1
 [0.9.0]: https://github.com/twcrews/crust/compare/0.8.1...0.9.0
 [0.8.1]: https://github.com/twcrews/crust/compare/0.8.0...0.8.1
 [0.8.0]: https://github.com/twcrews/crust/compare/0.7.0...0.8.0
