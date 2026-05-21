@@ -828,6 +828,12 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(contextExtensionSource, /CRUST_BRIDGE_URL/);
 		assert.match(explorerSource, /registerWebviewViewProvider\('crust\.sessions'/);
 		assert.match(explorerSource, /listSessionsForCwd\(getInitialCwd\(\)\)/);
+		assert.match(explorerSource, /if \(this\.view && !this\.view\.visible\) \{\s*return;\s*\}/);
+		assert.match(explorerSource, /if \(!this\.sessions\.length\) \{\s*this\.loading = true;\s*this\.render\(\);\s*\}/);
+		assert.match(explorerSource, /watcher\.onDidChange\(\(\) => this\.scheduleRefresh\(1500\)\)/);
+		assert.match(explorerSource, /this\.view\.webview\.html = this\.getHtml\(this\.view\.webview, content\);/);
+		assert.match(explorerSource, /this\.view\.webview\.postMessage\(\{ type: 'sessionsHtml', html: content \}\)/);
+		assert.match(explorerSource, /window\.addEventListener\('message', \(event\) => \{[\s\S]*sessions\.innerHTML = message\.html;[\s\S]*attachSessionListeners\(\);/);
 		assert.match(explorerSource, /CrustTerminalView\.focusSession\(session\.path\)/);
 		assert.match(explorerSource, /getUseTerminalViewByDefaultSetting\(\)/);
 	});
