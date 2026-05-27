@@ -37,6 +37,8 @@ form.addEventListener("submit", (event) => {
 	autoResizePrompt();
 	updateSlashAutocomplete();
 	updateSubmitButton();
+	setFollowChatEnabled(true);
+	scrollToBottom(true);
 	if (piProcessing) {
 		logWebview("Steering prompt", { length: text.trim().length });
 		vscode.postMessage({ type: "steer", text });
@@ -212,11 +214,34 @@ jumpNextUser.addEventListener("click", () => {
 	jumpToUserPrompt("next");
 });
 
-jumpBottom.addEventListener("click", () => {
-	scrollToBottom(true);
+followChat.addEventListener("click", () => {
+	const nextEnabled = !followChatEnabled;
+	setFollowChatEnabled(nextEnabled);
+	if (nextEnabled) {
+		scrollToBottom(true);
+	}
 });
 
-messages.addEventListener("scroll", updateConversationNavButtons);
+messages.addEventListener("scroll", handleMessagesScroll);
+messages.addEventListener("wheel", (event) => {
+	if (event.deltaY < 0) {
+		handleManualScrollUp();
+	}
+});
+messages.addEventListener("touchstart", (event) => {
+	lastTouchClientY = event.touches[0]?.clientY ?? null;
+});
+messages.addEventListener("touchmove", (event) => {
+	const currentTouchClientY = event.touches[0]?.clientY ?? null;
+	if (currentTouchClientY !== null && lastTouchClientY !== null && currentTouchClientY > lastTouchClientY) {
+		handleManualScrollUp();
+	}
+	lastTouchClientY = currentTouchClientY;
+});
+messages.addEventListener("touchend", () => {
+	lastTouchClientY = null;
+});
+setFollowChatEnabled(true);
 updateEmptyState();
 updateConversationNavButtons();
 focusPromptSoon();

@@ -45,6 +45,15 @@
 .conversation-nav-button:hover {
 	background: var(--vscode-toolbar-hoverBackground, var(--vscode-button-hoverBackground));
 }
+.conversation-nav-button.active,
+.conversation-nav-button[aria-pressed="true"] {
+	color: var(--vscode-button-foreground, var(--vscode-foreground));
+	background: var(--vscode-button-background, var(--vscode-toolbar-activeBackground));
+}
+.conversation-nav-button.active:hover,
+.conversation-nav-button[aria-pressed="true"]:hover {
+	background: var(--vscode-button-hoverBackground, var(--vscode-toolbar-hoverBackground));
+}
 .conversation-nav-button:disabled {
 	opacity: 0.45;
 	cursor: default;

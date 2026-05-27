@@ -838,6 +838,30 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(explorerSource, /getUseTerminalViewByDefaultSetting\(\)/);
 	});
 
+	test('wires follow chat controls to guarded autoscroll state', async () => {
+		const html = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview.html'), 'utf8');
+		const stateSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.state.js'), 'utf8');
+		const navigationSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.navigation.js'), 'utf8');
+		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
+		const css = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.navigation.css'), 'utf8');
+
+		assert.doesNotMatch(html, /id="jump-bottom"/);
+		assert.doesNotMatch(html, /class="conversation-nav-divider"/);
+		assert.match(html, /<span class="conversation-nav-item" data-tooltip="Follow chat">[\s\S]*<button id="follow-chat"[\s\S]*aria-label="Follow chat"[\s\S]*aria-pressed="true"/);
+		assert.match(stateSource, /const followChat = document\.getElementById\("follow-chat"\);/);
+		assert.match(stateSource, /let followChatEnabled = true;/);
+		assert.match(navigationSource, /function finishContentUpdate\(\) \{\s*if \(followChatEnabled\) \{\s*scrollToBottom\(\);\s*\}\s*\}/);
+		assert.match(navigationSource, /function handleMessagesScroll\(\)[\s\S]*if \(programmaticScrollToBottom\) \{[\s\S]*return;[\s\S]*if \(isAtBottom\(\)\) \{[\s\S]*setFollowChatEnabled\(true\);[\s\S]*setFollowChatEnabled\(false\);/);
+		assert.match(navigationSource, /function handleManualScrollUp\(\)[\s\S]*programmaticScrollToken \+= 1;[\s\S]*programmaticScrollToBottom = false;[\s\S]*setFollowChatEnabled\(false\);/);
+		assert.match(navigationSource, /function scrollToBottom\(smooth = false\)[\s\S]*programmaticScrollToBottom = true;[\s\S]*waitForProgrammaticScrollToBottom\(token\);/);
+		assert.match(mainSource, /prompt\.value = "";[\s\S]*setFollowChatEnabled\(true\);[\s\S]*scrollToBottom\(true\);[\s\S]*if \(piProcessing\)/);
+		assert.match(mainSource, /followChat\.addEventListener\("click"[\s\S]*setFollowChatEnabled\(nextEnabled\);[\s\S]*scrollToBottom\(true\);/);
+		assert.match(mainSource, /messages\.addEventListener\("scroll", handleMessagesScroll\);/);
+		assert.match(mainSource, /messages\.addEventListener\("wheel"[\s\S]*event\.deltaY < 0[\s\S]*handleManualScrollUp\(\);/);
+		assert.match(css, /\.conversation-nav-button\.active,/);
+		assert.doesNotMatch(css, /\.conversation-nav-divider \{/);
+	});
+
 	test('focuses the prompt when the chat opens', async () => {
 		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
 		const panelSource = await readFile(resolve(__dirname, '..', '..', 'src', 'ui', 'chatPanel.ts'), 'utf8');

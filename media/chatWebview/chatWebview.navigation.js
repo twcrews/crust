@@ -52,15 +52,69 @@ function setRandomEmptyStateFlavorText() {
 	emptyStateText.textContent = emptyStateFlavorTexts[Math.floor(Math.random() * emptyStateFlavorTexts.length)];
 }
 
+function isAtTop() {
+	return messages.scrollTop <= 2;
+}
+
+function isAtBottom() {
+	return messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 2;
+}
+
 function updateConversationNavButtons() {
-	const threshold = 2;
-	const atTop = messages.scrollTop <= threshold;
-	const atBottom = messages.scrollTop + messages.clientHeight >= messages.scrollHeight - threshold;
+	const atTop = isAtTop();
+	const atBottom = isAtBottom();
 
 	jumpTop.disabled = atTop;
 	jumpPreviousUser.disabled = atTop;
 	jumpNextUser.disabled = atBottom;
-	jumpBottom.disabled = atBottom;
+}
+
+function setFollowChatEnabled(enabled) {
+	followChatEnabled = Boolean(enabled);
+	followChat.classList.toggle("active", followChatEnabled);
+	followChat.setAttribute("aria-pressed", String(followChatEnabled));
+}
+
+function waitForProgrammaticScrollToBottom(token) {
+	const startedAt = Date.now();
+	const timeoutMs = 1000;
+	const finish = () => {
+		if (token !== programmaticScrollToken) {
+			return;
+		}
+		if (isAtBottom()) {
+			programmaticScrollToBottom = false;
+			setFollowChatEnabled(true);
+			updateConversationNavButtons();
+			return;
+		}
+		if (Date.now() - startedAt >= timeoutMs) {
+			programmaticScrollToBottom = false;
+			updateConversationNavButtons();
+			return;
+		}
+		window.requestAnimationFrame(finish);
+	};
+	window.requestAnimationFrame(finish);
+}
+
+function handleMessagesScroll() {
+	updateConversationNavButtons();
+
+	if (programmaticScrollToBottom) {
+		return;
+	}
+	if (isAtBottom()) {
+		setFollowChatEnabled(true);
+	} else {
+		setFollowChatEnabled(false);
+	}
+}
+
+function handleManualScrollUp() {
+	programmaticScrollToken += 1;
+	programmaticScrollToBottom = false;
+	setFollowChatEnabled(false);
 }
 
 function keepLoadingAtBottom() {
@@ -72,7 +126,9 @@ function keepLoadingAtBottom() {
 }
 
 function finishContentUpdate() {
-	scrollToBottom();
+	if (followChatEnabled) {
+		scrollToBottom();
+	}
 }
 
 function scrollMessagesTo(top, smooth) {
@@ -81,5 +137,10 @@ function scrollMessagesTo(top, smooth) {
 }
 
 function scrollToBottom(smooth = false) {
+	programmaticScrollToBottom = true;
+	programmaticScrollToken += 1;
+	const token = programmaticScrollToken;
+	setFollowChatEnabled(true);
 	scrollMessagesTo(messages.scrollHeight, smooth);
+	waitForProgrammaticScrollToBottom(token);
 }
