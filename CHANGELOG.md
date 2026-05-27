@@ -4,6 +4,12 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.10.0] - 2026-05-26
+
+- Added a toggle-able Follow chat control for enabling and pausing automatic scrolling in the chat webview.
+- Improved autoscroll behavior so manual upward scrolling pauses following while returning to the bottom re-enables it.
+- Updated follow-chat styling, tests, dependencies, and agent guidance.
+
 ## [0.9.1] - 2026-05-20
 
 - Fixed session explorer refreshes to update content without recreating the webview, reducing flicker while sessions change.
@@ -114,6 +120,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.10.0]: https://github.com/twcrews/crust/compare/0.9.1...0.10.0
 [0.9.1]: https://github.com/twcrews/crust/compare/0.9.0...0.9.1
 [0.9.0]: https://github.com/twcrews/crust/compare/0.8.1...0.9.0
 [0.8.1]: https://github.com/twcrews/crust/compare/0.8.0...0.8.1
