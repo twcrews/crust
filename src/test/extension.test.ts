@@ -448,6 +448,19 @@ suite('Session restore rendering', () => {
 		assert.ok(posts.some((post) => (post as { text?: string; secondary?: boolean }).text === '_Interrupted_' && (post as { secondary?: boolean }).secondary));
 		assert.ok(posts.some((post) => (post as { compaction?: boolean; text?: string }).compaction === true && (post as { text?: string }).text?.includes('12k tokens summarized')));
 	});
+
+	test('reattaches checkpoint ids to restored user prompts by prompt index', () => {
+		const posts: unknown[] = [];
+		restoreSessionMessages([
+			{ role: 'user', content: 'First' },
+			{ role: 'assistant', content: 'Answer' },
+			{ role: 'user', content: 'Second' },
+		], undefined, (message) => posts.push(message), () => undefined, (promptIndex) => promptIndex === 2 ? 'checkpoint-2' : undefined);
+
+		const userMessages = posts.filter((post) => (post as { role?: string }).role === 'user');
+		assert.strictEqual((userMessages[0] as { checkpointId?: string }).checkpointId, undefined);
+		assert.strictEqual((userMessages[1] as { checkpointId?: string }).checkpointId, 'checkpoint-2');
+	});
 });
 
 suite('IDE context utilities', () => {

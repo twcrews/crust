@@ -659,6 +659,8 @@ export class CrustChatPanel implements vscode.Disposable {
 
 		this.resetConversationState();
 		this.post({ type: 'clearMessages' });
+		this.post({ type: 'sessionPath', sessionPath: session.path });
+		this.watchSessionFile(session.path);
 
 		const messages = await this.client.getMessages();
 		this.log('Fetched session messages', { count: messages.length });
@@ -667,7 +669,9 @@ export class CrustChatPanel implements vscode.Disposable {
 		void this.refreshSlashCommands();
 	}
 	private async restoreMessages(messages: unknown[], sessionName?: string): Promise<void> {
-		const restored = restoreSessionMessages(messages, sessionName, (message) => this.post(message), (text) => this.getSlashCommandLabel(text));
+		const checkpoints = await this.reversionManager.listCheckpoints(this.activeSessionPath);
+		const checkpointByPromptIndex = new Map(checkpoints.map((checkpoint) => [checkpoint.promptIndex, checkpoint.id]));
+		const restored = restoreSessionMessages(messages, sessionName, (message) => this.post(message), (text) => this.getSlashCommandLabel(text), (promptIndex) => checkpointByPromptIndex.get(promptIndex));
 		this.conversationState.hasSessionTitle = restored.hasSessionTitle;
 		this.post({ type: 'sessionTitle', title: restored.title });
 		await this.postSessionStatus(messages);

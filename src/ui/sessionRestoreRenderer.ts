@@ -13,11 +13,15 @@ export function restoreSessionMessages(
 	sessionName: string | undefined,
 	post: PostFn,
 	getSlashCommandLabel: (text: string) => string | undefined,
+	getCheckpointIdForPromptIndex?: (promptIndex: number) => string | undefined,
 ): { title: string; hasSessionTitle: boolean } {
 	const restoredToolCalls = new Map<string, RestoredToolCall>();
 	let firstUserMessage: string | undefined;
+	let promptIndex = 0;
 	for (const message of messages) {
-		const restoredFirstUserMessage = restoreMessage(message, restoredToolCalls, post, getSlashCommandLabel);
+		const role = getMessageRole(message);
+		const checkpointId = role === 'user' ? getCheckpointIdForPromptIndex?.(++promptIndex) : undefined;
+		const restoredFirstUserMessage = restoreMessage(message, restoredToolCalls, post, getSlashCommandLabel, checkpointId);
 		firstUserMessage ??= restoredFirstUserMessage;
 	}
 
@@ -30,6 +34,7 @@ function restoreMessage(
 	toolCalls: Map<string, RestoredToolCall>,
 	post: PostFn,
 	getSlashCommandLabel: (text: string) => string | undefined,
+	checkpointId?: string,
 ): string | undefined {
 	const role = getMessageRole(message);
 	if (role === 'user') {
@@ -43,6 +48,7 @@ function restoreMessage(
 				text: slashCommandLabel && !restoredPrompt.skillLabel ? '' : restoredPrompt.text,
 				ideContextLabel: restoredPrompt.ideContextLabel,
 				slashCommandLabel,
+				checkpointId,
 			});
 			return slashCommandLabel ?? restoredPrompt.text;
 		}
