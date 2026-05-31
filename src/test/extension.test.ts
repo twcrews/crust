@@ -732,6 +732,19 @@ suite('Reversion manager', () => {
 		await assert.rejects(() => manager.applyResetPlan(plan), /unresolved conflict/);
 		assert.strictEqual(await readFile(file, 'utf8'), 'manual edit\n');
 	});
+
+	test('prunes old checkpoint metadata and detail files', async () => {
+		let firstCheckpointId = '';
+		for (let index = 1; index <= 101; index++) {
+			const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: `user-${index}`, promptText: `Prompt ${index}`, promptIndex: index });
+			firstCheckpointId ||= checkpoint.id;
+		}
+
+		const checkpoints = await manager.listCheckpoints('/tmp/session.jsonl');
+		assert.strictEqual(checkpoints.length, 100);
+		assert.strictEqual(checkpoints[0]?.promptIndex, 2);
+		assert.strictEqual(await manager.getCheckpoint(firstCheckpointId), undefined);
+	});
 });
 
 suite('Usage status formatting', () => {

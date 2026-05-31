@@ -5,6 +5,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import * as vscode from 'vscode';
 
 const reversionVersion = 1;
+const maxCheckpointsPerSession = 100;
 const unsavedSessionKey = '__unsaved_session__';
 
 export type FileSnapshot = {
@@ -390,8 +391,11 @@ export class ReversionManager {
 		const session = workspace.sessions[sessionKey] ?? { sessionPath: checkpoint.sessionPath, checkpoints: [] };
 		const summary = toSummary(checkpoint);
 
-		session.checkpoints = [...session.checkpoints.filter((existing) => existing.id !== checkpoint.id), summary]
+		const sortedCheckpoints = [...session.checkpoints.filter((existing) => existing.id !== checkpoint.id), summary]
 			.sort((left, right) => left.promptIndex - right.promptIndex || left.createdAt.localeCompare(right.createdAt));
+		const prunedCheckpoints = sortedCheckpoints.slice(0, Math.max(0, sortedCheckpoints.length - maxCheckpointsPerSession));
+		session.checkpoints = sortedCheckpoints.slice(-maxCheckpointsPerSession);
+		await Promise.all(prunedCheckpoints.map((pruned) => rm(this.getCheckpointPath(pruned.id), { force: true })));
 		workspace.sessions[sessionKey] = session;
 		index.workspaces[workspaceKey] = workspace;
 		await this.writeIndex(index);
