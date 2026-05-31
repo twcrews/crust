@@ -1204,6 +1204,38 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 
+	private async resetCodeToCheckpoint(checkpointId: string): Promise<void> {
+		if (this.conversationState.isProcessing) {
+			void vscode.window.showInformationMessage('Wait for the current response to finish before resetting code.');
+			return;
+		}
+		try {
+			const plan = await this.reversionManager.buildResetPlan(checkpointId);
+			if (plan.conflicts.length) {
+				await vscode.window.showErrorMessage('Cannot reset code because some files changed outside of Crust.', { modal: true, detail: plan.conflicts.map((conflict) => `- ${conflict.message}`).join('\n') }, 'OK');
+				return;
+			}
+			if (!plan.affectedFiles.length) {
+				await vscode.window.showInformationMessage('No code changes would be made.', { modal: true }, 'OK');
+				return;
+			}
+			const detail = [
+				`Affected files: ${plan.stats.affectedFileCount}`,
+				`Lines added: ${plan.stats.addedLineCount}`,
+				`Lines removed: ${plan.stats.removedLineCount}`,
+				plan.unsafeMutationCount ? `Warning: ${plan.unsafeMutationCount} shell command${plan.unsafeMutationCount === 1 ? '' : 's'} ran after this point. Some changes may not be tracked.` : undefined,
+			].filter((line): line is string => Boolean(line)).join('\n');
+			const choice = await vscode.window.showWarningMessage('Reset code to this point?', { modal: true, detail }, 'Reset Code', 'Cancel');
+			if (choice !== 'Reset Code') {
+				return;
+			}
+			const appliedPlan = await this.reversionManager.applyResetPlan(plan);
+			void vscode.window.showInformationMessage(`Reset ${appliedPlan.stats.affectedFileCount} file${appliedPlan.stats.affectedFileCount === 1 ? '' : 's'}.`);
+		} catch (error) {
+			void vscode.window.showErrorMessage(`Unable to reset code: ${errorMessage(error)}`);
+		}
+	}
+
 	private async selectModel(selectedModelKey: string | undefined): Promise<void> {
 		const model = this.models.find((candidate) => modelKey(candidate) === selectedModelKey);
 		if (!model) {

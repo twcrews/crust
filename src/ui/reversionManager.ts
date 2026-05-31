@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import * as vscode from 'vscode';
 
@@ -236,6 +236,28 @@ export class ReversionManager {
 		await this.persistCheckpointUpdate(checkpoint);
 	}
 
+	async applyResetPlan(plan: ResetPlan): Promise<ResetPlan> {
+		const freshPlan = await this.buildResetPlan(plan.checkpointId);
+		if (freshPlan.conflicts.length) {
+			throw new Error(`Cannot reset code with ${freshPlan.conflicts.length} unresolved conflict${freshPlan.conflicts.length === 1 ? '' : 's'}.`);
+		}
+		if (!freshPlan.affectedFiles.length) {
+			return freshPlan;
+		}
+
+		const safetyCheckpoint = await this.createSafetyCheckpoint(freshPlan);
+		for (const change of freshPlan.affectedFiles) {
+			if (change.target.exists) {
+				await mkdir(dirname(change.absolutePath), { recursive: true });
+				await writeFile(change.absolutePath, change.target.content ?? '', 'utf8');
+			} else {
+				await rm(change.absolutePath, { force: true });
+			}
+			await this.recordFileMutationEnd(safetyCheckpoint.id, { toolCallId: `reset:${change.absolutePath}`, toolName: 'edit', filePath: change.absolutePath, workspaceRoot: safetyCheckpoint.workspaceRoot });
+		}
+		return freshPlan;
+	}
+
 	async buildResetPlan(checkpointId: string): Promise<ResetPlan> {
 		const targetCheckpoint = await this.getCheckpoint(checkpointId);
 		if (!targetCheckpoint) {
@@ -328,6 +350,25 @@ export class ReversionManager {
 
 	async ensureStorage(): Promise<void> {
 		await mkdir(this.getCheckpointsDirectory(), { recursive: true });
+	}
+
+	private async createSafetyCheckpoint(plan: ResetPlan): Promise<ReversionCheckpointSummary> {
+		const targetCheckpoint = await this.getCheckpoint(plan.checkpointId);
+		if (!targetCheckpoint) {
+			throw new Error(`Reversion checkpoint not found: ${plan.checkpointId}`);
+		}
+		const summaries = await this.listCheckpoints(targetCheckpoint.sessionPath, targetCheckpoint.workspaceRoot);
+		const promptIndex = Math.max(0, ...summaries.map((summary) => summary.promptIndex)) + 1;
+		const checkpoint = await this.createCheckpoint({
+			sessionPath: targetCheckpoint.sessionPath,
+			promptText: `Before reset to prompt ${targetCheckpoint.promptIndex}`,
+			promptIndex,
+			workspaceRoot: targetCheckpoint.workspaceRoot,
+		});
+		for (const change of plan.affectedFiles) {
+			await this.recordFileMutationStart(checkpoint.id, { toolCallId: `reset:${change.absolutePath}`, toolName: 'edit', filePath: change.absolutePath, workspaceRoot: targetCheckpoint.workspaceRoot });
+		}
+		return checkpoint;
 	}
 
 	private async persistCheckpointUpdate(checkpoint: ReversionCheckpoint): Promise<void> {

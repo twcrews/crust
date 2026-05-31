@@ -683,6 +683,40 @@ suite('Reversion manager', () => {
 		assert.strictEqual(plan.conflicts.length, 1);
 		assert.strictEqual(plan.conflicts[0]?.reason, 'current-hash-mismatch');
 	});
+
+	test('applies reset plans and records a safety checkpoint', async () => {
+		const file = join(directory, 'example.ts');
+		await writeFile(file, 'before\n');
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		await manager.recordFileMutationStart(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'after\nextra\n');
+		await manager.recordFileMutationEnd(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+
+		const applied = await manager.applyResetPlan(await manager.buildResetPlan(checkpoint.id));
+		assert.strictEqual(applied.stats.affectedFileCount, 1);
+		assert.strictEqual(await readFile(file, 'utf8'), 'before\n');
+
+		const checkpoints = await manager.listCheckpoints('/tmp/session.jsonl');
+		assert.strictEqual(checkpoints.length, 2);
+		assert.strictEqual(checkpoints[1]?.promptText, 'Before reset to prompt 1');
+		const safetyCheckpoint = await manager.getCheckpoint(checkpoints[1]!.id);
+		assert.strictEqual(safetyCheckpoint?.mutations[0]?.before.content, 'after\nextra\n');
+		assert.strictEqual(safetyCheckpoint?.mutations[0]?.after?.content, 'before\n');
+	});
+
+	test('revalidates reset plans before applying them', async () => {
+		const file = join(directory, 'example.ts');
+		await writeFile(file, 'before\n');
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		await manager.recordFileMutationStart(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'after\n');
+		await manager.recordFileMutationEnd(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		const plan = await manager.buildResetPlan(checkpoint.id);
+		await writeFile(file, 'manual edit\n');
+
+		await assert.rejects(() => manager.applyResetPlan(plan), /unresolved conflict/);
+		assert.strictEqual(await readFile(file, 'utf8'), 'manual edit\n');
+	});
 });
 
 suite('Usage status formatting', () => {
