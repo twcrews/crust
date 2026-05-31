@@ -596,6 +596,39 @@ suite('Reversion manager', () => {
 		assert.strictEqual(countLines('one\ntwo\n'), 2);
 		assert.deepStrictEqual(await manager.readFileSnapshot(join(directory, 'missing.txt')), { exists: false });
 	});
+
+	test('records file mutation before and after snapshots', async () => {
+		const file = join(directory, 'src', 'example.ts');
+		await mkdir(join(directory, 'src'), { recursive: true });
+		await writeFile(file, 'old\n');
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+
+		await manager.recordFileMutationStart(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'src/example.ts' });
+		await writeFile(file, 'new\nline\n');
+		await manager.recordFileMutationEnd(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'src/example.ts' });
+
+		const restored = await manager.getCheckpoint(checkpoint.id);
+		assert.strictEqual(restored?.mutationCount, 1);
+		assert.strictEqual(restored?.mutations[0]?.path, 'src/example.ts');
+		assert.strictEqual(restored?.mutations[0]?.before.content, 'old\n');
+		assert.strictEqual(restored?.mutations[0]?.after?.content, 'new\nline\n');
+		assert.strictEqual(restored?.mutations[0]?.after?.lineCount, 2);
+
+		const summaries = await manager.listCheckpoints('/tmp/session.jsonl');
+		assert.strictEqual(summaries[0]?.mutationCount, 1);
+	});
+
+	test('records unsafe mutations once per tool call', async () => {
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Run shell', promptIndex: 1 });
+
+		await manager.recordUnsafeMutation(checkpoint.id, { toolCallId: 'call-1', toolName: 'bash', description: 'npm test' });
+		await manager.recordUnsafeMutation(checkpoint.id, { toolCallId: 'call-1', toolName: 'bash', description: 'npm test' });
+
+		const restored = await manager.getCheckpoint(checkpoint.id);
+		assert.strictEqual(restored?.unsafeMutationCount, 1);
+		assert.strictEqual(restored?.unsafeMutations[0]?.description, 'npm test');
+		assert.strictEqual((await manager.listCheckpoints('/tmp/session.jsonl'))[0]?.unsafeMutationCount, 1);
+	});
 });
 
 suite('Usage status formatting', () => {

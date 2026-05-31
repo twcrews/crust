@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import * as vscode from 'vscode';
 
 const reversionVersion = 1;
@@ -71,6 +71,19 @@ export type CreateCheckpointArgs = {
 	workspaceRoot?: string;
 };
 
+export type FileMutationArgs = {
+	toolCallId?: string;
+	toolName: 'write' | 'edit';
+	filePath: string;
+	workspaceRoot?: string;
+};
+
+export type UnsafeMutationArgs = {
+	toolCallId?: string;
+	toolName: string;
+	description?: string;
+};
+
 type ReversionStorageContext = {
 	globalStorageUri: vscode.Uri;
 	workspaceStorageUri?: vscode.Uri;
@@ -131,6 +144,70 @@ export class ReversionManager {
 		return Object.values(workspace.sessions).flatMap((session) => session.checkpoints);
 	}
 
+	async recordFileMutationStart(checkpointId: string, args: FileMutationArgs): Promise<void> {
+		const checkpoint = await this.getCheckpoint(checkpointId);
+		if (!checkpoint) {
+			return;
+		}
+
+		const file = this.resolveMutationPath(args.filePath, args.workspaceRoot ?? checkpoint.workspaceRoot);
+		if (checkpoint.mutations.some((mutation) => mutation.toolCallId === args.toolCallId && args.toolCallId !== undefined || mutation.absolutePath === file.absolutePath)) {
+			return;
+		}
+
+		checkpoint.mutations.push({
+			path: file.relativePath,
+			absolutePath: file.absolutePath,
+			before: await this.readFileSnapshot(file.absolutePath),
+			toolCallId: args.toolCallId,
+			toolName: args.toolName,
+		});
+		checkpoint.mutationCount = checkpoint.mutations.filter((mutation) => mutation.after !== undefined).length;
+		await this.persistCheckpointUpdate(checkpoint);
+	}
+
+	async recordFileMutationEnd(checkpointId: string, args: FileMutationArgs): Promise<void> {
+		const checkpoint = await this.getCheckpoint(checkpointId);
+		if (!checkpoint) {
+			return;
+		}
+
+		const file = this.resolveMutationPath(args.filePath, args.workspaceRoot ?? checkpoint.workspaceRoot);
+		const mutation = checkpoint.mutations.find((candidate) => candidate.toolCallId === args.toolCallId && args.toolCallId !== undefined || candidate.absolutePath === file.absolutePath);
+		if (!mutation) {
+			checkpoint.mutations.push({
+				path: file.relativePath,
+				absolutePath: file.absolutePath,
+				before: await this.readFileSnapshot(file.absolutePath),
+				after: await this.readFileSnapshot(file.absolutePath),
+				toolCallId: args.toolCallId,
+				toolName: args.toolName,
+			});
+		} else {
+			mutation.after = await this.readFileSnapshot(file.absolutePath);
+		}
+		checkpoint.mutationCount = checkpoint.mutations.filter((item) => item.after !== undefined).length;
+		await this.persistCheckpointUpdate(checkpoint);
+	}
+
+	async recordUnsafeMutation(checkpointId: string, args: UnsafeMutationArgs): Promise<void> {
+		const checkpoint = await this.getCheckpoint(checkpointId);
+		if (!checkpoint) {
+			return;
+		}
+		if (args.toolCallId && checkpoint.unsafeMutations.some((mutation) => mutation.toolCallId === args.toolCallId)) {
+			return;
+		}
+		checkpoint.unsafeMutations.push({
+			toolCallId: args.toolCallId,
+			toolName: args.toolName,
+			description: args.description,
+			timestamp: new Date().toISOString(),
+		});
+		checkpoint.unsafeMutationCount = checkpoint.unsafeMutations.length;
+		await this.persistCheckpointUpdate(checkpoint);
+	}
+
 	async readFileSnapshot(absolutePath: string): Promise<FileSnapshot> {
 		try {
 			const content = await readFile(absolutePath, 'utf8');
@@ -150,6 +227,17 @@ export class ReversionManager {
 
 	async ensureStorage(): Promise<void> {
 		await mkdir(this.getCheckpointsDirectory(), { recursive: true });
+	}
+
+	private async persistCheckpointUpdate(checkpoint: ReversionCheckpoint): Promise<void> {
+		await this.writeCheckpoint(checkpoint);
+		await this.upsertCheckpointSummary(checkpoint);
+	}
+
+	private resolveMutationPath(filePath: string, workspaceRoot: string): { absolutePath: string; relativePath: string } {
+		const absolutePath = resolve(workspaceRoot || this.defaultWorkspaceRoot || process.cwd(), filePath);
+		const relativePath = workspaceRoot ? normalizePath(relative(workspaceRoot, absolutePath)) : normalizePath(filePath);
+		return { absolutePath, relativePath };
 	}
 
 	private async upsertCheckpointSummary(checkpoint: ReversionCheckpoint): Promise<void> {
@@ -243,6 +331,10 @@ function getWorkspaceKey(workspaceRoot: string): string {
 
 function getSessionKey(sessionPath: string | undefined): string {
 	return sessionPath ? hashContent(sessionPath) : unsavedSessionKey;
+}
+
+function normalizePath(filePath: string): string {
+	return filePath.replace(/\\/g, '/');
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

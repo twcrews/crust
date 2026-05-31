@@ -15,10 +15,12 @@ import { getMessageRole, getMessageText } from './messageUtils';
 import { createId, formatErrorForChat, formatSessionDate, getAbortMessage, getInitialCwd, getLastModelFromSessionText, getModelContextWindow, getPostLogDetails, getSessionPath, getWorkspaceStatus, hasMessageUsage, isAbortedAssistantMessage, modelKey, truncate } from './chatPanelUtils';
 import { createConversationState, resetStreamingState, type ConversationState } from './conversationState';
 import { getPathSuggestions } from './pathAutocomplete';
+import { ReversionManager } from './reversionManager';
 import { listSessions } from './sessionHistory';
 import { restoreSessionMessages } from './sessionRestoreRenderer';
 import { getBuiltinSlashCommands, getPiChangelogMarkdown, isSupportedBuiltinSlashCommand, orderSlashCommands } from './slashCommands';
 import { StreamingEventRenderer } from './streamingEventRenderer';
+import { getToolPath } from './toolUtils';
 import { formatUsageStatus } from './usageStatus';
 
 const execFileAsync = promisify(execFile);
@@ -163,6 +165,10 @@ export class CrustChatPanel implements vscode.Disposable {
 	private allowRawHtml = getAllowRawHtmlSetting();
 	private includeIdeContextByDefault = getIncludeIdeContextByDefaultSetting();
 	private projectFilesByRoot = new Map<string, Set<string>>();
+	private readonly reversionManager: ReversionManager;
+	private activeReversionCheckpointId: string | undefined;
+	private submittedPromptCount = 0;
+	private readonly activeToolArgs = new Map<string, unknown>();
 
 	static show(context: vscode.ExtensionContext): void {
 		void CrustChatPanel.open(context);
@@ -241,6 +247,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	) {
 		this.cwd = getInitialCwd();
 		this.client = new PiRpcClient(this.cwd, getPiCommandPathSetting());
+		this.reversionManager = new ReversionManager(this.context, this.cwd);
 		this.log('Creating chat panel', { cwd: this.cwd });
 		this.panel.iconPath = this.getIconPath();
 		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview, { allowRawHtml: this.allowRawHtml, includeIdeContextByDefault: this.includeIdeContextByDefault });
@@ -320,6 +327,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				}
 			}
 			const messages = await this.client.getMessages();
+			this.submittedPromptCount = messages.filter((message) => getMessageRole(message) === 'user').length;
 			this.models = models;
 			this.piSlashCommands = commands;
 			this.builtinSlashCommands = builtinCommands;
@@ -1126,6 +1134,13 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 
 		const userMessageId = createId('user');
+		const checkpoint = await this.reversionManager.createCheckpoint({
+			sessionPath: this.activeSessionPath,
+			promptMessageId: userMessageId,
+			promptText: displayText,
+			promptIndex: ++this.submittedPromptCount,
+		});
+		this.activeReversionCheckpointId = checkpoint.id;
 		this.conversationState.activeLoadingMessageId = createId('loading');
 		this.conversationState.activeTextMessageIds.clear();
 		this.conversationState.activeAbortIndicatorShown = false;
@@ -1221,7 +1236,66 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 	private handlePiEvent(event: RpcEvent): void {
+		void this.trackReversionEvent(event);
 		this.createStreamingEventRenderer().handlePiEvent(event);
+		if (event.type === 'agent_end') {
+			this.activeReversionCheckpointId = undefined;
+			this.activeToolArgs.clear();
+		}
+	}
+
+	private async trackReversionEvent(event: RpcEvent): Promise<void> {
+		const checkpointId = this.activeReversionCheckpointId;
+		if (!checkpointId) {
+			return;
+		}
+
+		if (event.type === 'tool_execution_start' && event.toolCallId && event.args !== undefined) {
+			this.activeToolArgs.set(event.toolCallId, event.args);
+		}
+		if (event.type === 'tool_execution_end' && event.toolCallId && event.args !== undefined) {
+			this.activeToolArgs.set(event.toolCallId, event.args);
+		}
+
+		if (event.type === 'tool_execution_start' && event.toolName === 'bash') {
+			await this.reversionManager.recordUnsafeMutation(checkpointId, {
+				toolCallId: event.toolCallId,
+				toolName: 'bash',
+				description: this.describeToolArgs(event.args),
+			});
+			return;
+		}
+
+		if (event.type !== 'tool_execution_start' && event.type !== 'tool_execution_end') {
+			return;
+		}
+		if (event.toolName !== 'write' && event.toolName !== 'edit') {
+			return;
+		}
+		if (event.type === 'tool_execution_end' && event.isError) {
+			return;
+		}
+
+		const args = event.args ?? (event.toolCallId ? this.activeToolArgs.get(event.toolCallId) : undefined);
+		const filePath = getToolPath(args);
+		if (!filePath) {
+			return;
+		}
+		if (event.type === 'tool_execution_start') {
+			await this.reversionManager.recordFileMutationStart(checkpointId, { toolCallId: event.toolCallId, toolName: event.toolName, filePath });
+		} else {
+			await this.reversionManager.recordFileMutationEnd(checkpointId, { toolCallId: event.toolCallId, toolName: event.toolName, filePath });
+		}
+	}
+
+	private describeToolArgs(args: unknown): string | undefined {
+		if (typeof args === 'object' && args !== null) {
+			const command = (args as { command?: unknown; cmd?: unknown }).command ?? (args as { command?: unknown; cmd?: unknown }).cmd;
+			if (typeof command === 'string') {
+				return command;
+			}
+		}
+		return undefined;
 	}
 
 	private createStreamingEventRenderer(): StreamingEventRenderer {
