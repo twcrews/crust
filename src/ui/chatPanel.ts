@@ -169,6 +169,8 @@ export class CrustChatPanel implements vscode.Disposable {
 	private activeReversionCheckpointId: string | undefined;
 	private submittedPromptCount = 0;
 	private readonly activeToolArgs = new Map<string, unknown>();
+	private resetDialogRequestId = 0;
+	private readonly pendingResetDialogs = new Map<number, (confirmed: boolean) => void>();
 
 	static show(context: vscode.ExtensionContext): void {
 		void CrustChatPanel.open(context);
@@ -290,6 +292,10 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 		CrustChatPanel.onDidChangeOpenSessionsEmitter.fire();
 		this.client.dispose();
+		for (const resolve of this.pendingResetDialogs.values()) {
+			resolve(false);
+		}
+		this.pendingResetDialogs.clear();
 		this.disposeSessionWatcher();
 		while (this.disposables.length) {
 			this.disposables.pop()?.dispose();
@@ -399,6 +405,9 @@ export class CrustChatPanel implements vscode.Disposable {
 				break;
 			case 'requestResetToCheckpoint':
 				await this.resetCodeToCheckpoint(message.checkpointId);
+				break;
+			case 'resetDialogResponse':
+				this.resolveResetDialog(message.requestId, message.action === 'confirm');
 				break;
 			case 'webviewLog':
 				if (message.level === 'warn' || message.level === 'error') {
@@ -1213,17 +1222,22 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private async resetCodeToCheckpoint(checkpointId: string): Promise<void> {
 		if (this.conversationState.isProcessing) {
-			void vscode.window.showInformationMessage('Wait for the current response to finish before resetting code.');
+			await this.showResetDialog({ title: 'Wait for the current response to finish before resetting code.', confirmLabel: 'OK', severity: 'info' });
 			return;
 		}
 		try {
 			const plan = await this.reversionManager.buildResetPlan(checkpointId);
 			if (plan.conflicts.length) {
-				await vscode.window.showErrorMessage('Cannot reset code because some files changed outside of Crust.', { modal: true, detail: plan.conflicts.map((conflict) => `- ${conflict.message}`).join('\n') }, 'OK');
+				await this.showResetDialog({
+					title: 'Cannot reset code because some files changed outside of Crust.',
+					detail: plan.conflicts.map((conflict) => `- ${conflict.message}`).join('\n'),
+					confirmLabel: 'OK',
+					severity: 'error',
+				});
 				return;
 			}
 			if (!plan.affectedFiles.length) {
-				await vscode.window.showInformationMessage('No code changes would be made.', { modal: true }, 'OK');
+				await this.showResetDialog({ title: 'No code changes would be made.', confirmLabel: 'OK', severity: 'info' });
 				return;
 			}
 			const detail = [
@@ -1232,15 +1246,32 @@ export class CrustChatPanel implements vscode.Disposable {
 				`Lines removed: ${plan.stats.removedLineCount}`,
 				plan.unsafeMutationCount ? `Warning: ${plan.unsafeMutationCount} shell command${plan.unsafeMutationCount === 1 ? '' : 's'} ran after this point. Some changes may not be tracked.` : undefined,
 			].filter((line): line is string => Boolean(line)).join('\n');
-			const choice = await vscode.window.showWarningMessage('Reset code to this point?', { modal: true, detail }, 'Reset Code', 'Cancel');
-			if (choice !== 'Reset Code') {
+			const confirmed = await this.showResetDialog({ title: 'Reset code to this point?', detail, confirmLabel: 'Reset Code', cancelLabel: 'Cancel', severity: 'warning' });
+			if (!confirmed) {
 				return;
 			}
 			const appliedPlan = await this.reversionManager.applyResetPlan(plan);
-			void vscode.window.showInformationMessage(`Reset ${appliedPlan.stats.affectedFileCount} file${appliedPlan.stats.affectedFileCount === 1 ? '' : 's'}.`);
+			this.post({ type: 'status', message: `Reset ${appliedPlan.stats.affectedFileCount} file${appliedPlan.stats.affectedFileCount === 1 ? '' : 's'}.` });
 		} catch (error) {
-			void vscode.window.showErrorMessage(`Unable to reset code: ${errorMessage(error)}`);
+			await this.showResetDialog({ title: `Unable to reset code: ${errorMessage(error)}`, confirmLabel: 'OK', severity: 'error' });
 		}
+	}
+
+	private showResetDialog(options: { title: string; detail?: string; confirmLabel: string; cancelLabel?: string; severity: 'info' | 'warning' | 'error' }): Promise<boolean> {
+		const requestId = ++this.resetDialogRequestId;
+		this.post({ type: 'resetDialog', requestId, ...options });
+		return new Promise((resolve) => {
+			this.pendingResetDialogs.set(requestId, resolve);
+		});
+	}
+
+	private resolveResetDialog(requestId: number, confirmed: boolean): void {
+		const resolve = this.pendingResetDialogs.get(requestId);
+		if (!resolve) {
+			return;
+		}
+		this.pendingResetDialogs.delete(requestId);
+		resolve(confirmed);
 	}
 
 	private async selectModel(selectedModelKey: string | undefined): Promise<void> {

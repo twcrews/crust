@@ -100,6 +100,19 @@
 			</div>
 		</form>
 	</div>
+	<div id="modal-backdrop" class="modal-backdrop hidden" role="presentation">
+		<div class="webview-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-detail">
+			<div id="modal-icon" class="modal-icon" aria-hidden="true"></div>
+			<div class="modal-content">
+				<h2 id="modal-title" class="modal-title"></h2>
+				<p id="modal-detail" class="modal-detail"></p>
+				<div class="modal-actions">
+					<button id="modal-cancel" class="modal-button secondary" type="button">Cancel</button>
+					<button id="modal-confirm" class="modal-button primary" type="button">OK</button>
+				</div>
+			</div>
+		</div>
+	</div>
 
 	{{scriptTags}}
 </body>

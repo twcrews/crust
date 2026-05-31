@@ -70,6 +70,33 @@ function requestCancelCurrentTask(source) {
 	vscode.postMessage({ type: "cancel" });
 }
 
+function showModal(message) {
+	activeModalRequestId = message.requestId;
+	previousModalFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	modalTitle.textContent = message.title;
+	modalDetail.textContent = message.detail || "";
+	modalConfirm.textContent = message.confirmLabel || "OK";
+	modalCancel.textContent = message.cancelLabel || "Cancel";
+	modalCancel.hidden = !message.cancelLabel;
+	modalIcon.className = `modal-icon ${message.severity === "warning" || message.severity === "error" ? message.severity : ""}`.trim();
+	modalBackdrop.classList.remove("hidden");
+	(modalCancel.hidden ? modalConfirm : modalCancel).focus();
+}
+
+function respondToModal(action) {
+	if (!activeModalRequestId) {
+		return;
+	}
+	const requestId = activeModalRequestId;
+	activeModalRequestId = 0;
+	modalBackdrop.classList.add("hidden");
+	vscode.postMessage({ type: "resetDialogResponse", requestId, action });
+	if (previousModalFocus && document.contains(previousModalFocus)) {
+		previousModalFocus.focus();
+	}
+	previousModalFocus = null;
+}
+
 function hasCopyableSelection() {
 	if (document.activeElement === prompt && prompt.selectionStart !== prompt.selectionEnd) {
 		return true;
@@ -202,6 +229,21 @@ newChat.addEventListener("click", () => {
 	vscode.postMessage({ type: "newChat" });
 });
 
+modalConfirm.addEventListener("click", () => respondToModal("confirm"));
+modalCancel.addEventListener("click", () => respondToModal("cancel"));
+modalBackdrop.addEventListener("click", (event) => {
+	if (event.target === modalBackdrop && !modalCancel.hidden) {
+		respondToModal("cancel");
+	}
+});
+document.addEventListener("keydown", (event) => {
+	if (modalBackdrop.classList.contains("hidden") || event.key !== "Escape") {
+		return;
+	}
+	event.preventDefault();
+	respondToModal(modalCancel.hidden ? "confirm" : "cancel");
+});
+
 jumpTop.addEventListener("click", () => {
 	scrollMessagesTo(0, true);
 });
@@ -267,6 +309,10 @@ function parseExtensionMessage(value) {
 			return { type: "markdownSettings", allowRawHtml: value.allowRawHtml === true };
 		case "chatSettings":
 			return { type: "chatSettings", includeIdeContextByDefault: value.includeIdeContextByDefault === true };
+		case "resetDialog":
+			return typeof value.requestId === "number" && typeof value.title === "string"
+				? { type: "resetDialog", requestId: value.requestId, title: value.title, detail: stringValue(value.detail), confirmLabel: stringValue(value.confirmLabel, "OK"), cancelLabel: stringValue(value.cancelLabel, undefined), severity: stringValue(value.severity, "info") }
+				: null;
 		case "pathAutocomplete":
 			return typeof value.requestId === "number" ? { type: "pathAutocomplete", requestId: value.requestId, suggestions: arrayValue(value.suggestions) } : null;
 		case "projectFiles":
@@ -318,6 +364,9 @@ window.addEventListener("message", (event) => {
 			break;
 		case "chatSettings":
 			setChatSettings({ includeIdeContextByDefault: message.includeIdeContextByDefault === true });
+			break;
+		case "resetDialog":
+			showModal(message);
 			break;
 		case "focusModel":
 			model.focus();

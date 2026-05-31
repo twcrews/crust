@@ -265,6 +265,7 @@ suite('Webview message parsing', () => {
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'openProjectFile', path: 'src/ui/chatPanel.ts:12' }), { type: 'openProjectFile', path: 'src/ui/chatPanel.ts:12' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'validateFileReferences', requestId: 1, references: ['src/ui/chatPanel.ts', 2] }), { type: 'validateFileReferences', requestId: 1, references: ['src/ui/chatPanel.ts'] });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'requestResetToCheckpoint', checkpointId: 'checkpoint-1' }), { type: 'requestResetToCheckpoint', checkpointId: 'checkpoint-1' });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'resetDialogResponse', requestId: 7, action: 'confirm' }), { type: 'resetDialogResponse', requestId: 7, action: 'confirm' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'debug' }), { type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'info' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'failed', level: 'error' }), { type: 'webviewLog', message: 'failed', details: undefined, level: 'error' });
 	});
@@ -278,6 +279,8 @@ suite('Webview message parsing', () => {
 		assert.strictEqual(parseWebviewMessage({ type: 'openProjectFile', path: 1 }), undefined);
 		assert.strictEqual(parseWebviewMessage({ type: 'validateFileReferences', requestId: '1', references: [] }), undefined);
 		assert.strictEqual(parseWebviewMessage({ type: 'requestResetToCheckpoint', checkpointId: 1 }), undefined);
+		assert.strictEqual(parseWebviewMessage({ type: 'resetDialogResponse', requestId: '7', action: 'confirm' }), undefined);
+		assert.strictEqual(parseWebviewMessage({ type: 'resetDialogResponse', requestId: 7, action: 'close' }), undefined);
 		assert.strictEqual(parseWebviewMessage({ type: 'unknown' }), undefined);
 	});
 });
@@ -925,7 +928,22 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(source, /vscode\.postMessage\(\{ type: "requestResetToCheckpoint", checkpointId \}\);/);
 		assert.match(mainSource, /addMessage\(message\.id[\s\S]*message\.compaction === true, message\.checkpointId \?\? ""\);/);
 		assert.match(css, /\.reset-checkpoint-button \{[\s\S]*position: absolute;[\s\S]*right: -9px;[\s\S]*bottom: -9px;/);
+		assert.match(css, /\.reset-checkpoint-button \{[\s\S]*background: var\(--vscode-editorWidget-background/);
 		assert.match(css, /\.user:hover \.reset-checkpoint-button,[\s\S]*\.user:focus-within \.reset-checkpoint-button \{[\s\S]*opacity: 1;/);
+	});
+
+	test('renders reset confirmations as webview modals', async () => {
+		const html = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview.html'), 'utf8');
+		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
+		const baseCss = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.base.css'), 'utf8');
+		const panelSource = await readFile(resolve(__dirname, '..', '..', 'src', 'ui', 'chatPanel.ts'), 'utf8');
+
+		assert.match(html, /id="modal-backdrop"[\s\S]*role="dialog"[\s\S]*aria-modal="true"/);
+		assert.match(mainSource, /case "resetDialog":[\s\S]*showModal\(message\);/);
+		assert.match(mainSource, /function respondToModal\(action\) \{[\s\S]*vscode\.postMessage\(\{ type: "resetDialogResponse", requestId, action \}\);/);
+		assert.match(baseCss, /\.modal-backdrop \{[\s\S]*position: fixed;[\s\S]*background: rgba\(0, 0, 0, 0\.35\);/);
+		assert.match(panelSource, /this\.post\(\{ type: 'resetDialog', requestId, \.\.\.options \}\);/);
+		assert.doesNotMatch(panelSource, /showWarningMessage\('Reset code to this point\?', \{ modal: true/);
 	});
 
 	test('renders compaction messages as expandable shaded bubbles with first-line previews', async () => {

@@ -23,6 +23,12 @@ const jumpTop = document.getElementById("jump-top");
 const jumpPreviousUser = document.getElementById("jump-previous-user");
 const jumpNextUser = document.getElementById("jump-next-user");
 const followChat = document.getElementById("follow-chat");
+const modalBackdrop = document.getElementById("modal-backdrop");
+const modalTitle = document.getElementById("modal-title");
+const modalDetail = document.getElementById("modal-detail");
+const modalIcon = document.getElementById("modal-icon");
+const modalCancel = document.getElementById("modal-cancel");
+const modalConfirm = document.getElementById("modal-confirm");
 let includeIdeContextByDefault = window.crustInitialSettings?.includeIdeContextByDefault === true;
 let ideContextEnabled = includeIdeContextByDefault;
 let currentIdeContextLabel = "";
@@ -50,6 +56,8 @@ let projectRoots = [];
 let pendingFileReferenceValidation = new Set();
 let fileReferenceValidationTimer = 0;
 let fileReferenceValidationRequestId = 0;
+let activeModalRequestId = 0;
+let previousModalFocus = null;
 
 const emptyStateFlavorTexts = [
 	"Fun fact: this extension was almost named 'Circumference'!",

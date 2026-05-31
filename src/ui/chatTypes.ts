@@ -13,6 +13,7 @@ export type WebviewMessage =
 	| { type: 'validateFileReferences'; requestId: number; references: string[] }
 	| { type: 'refreshSlashCommands' }
 	| { type: 'requestResetToCheckpoint'; checkpointId: string }
+	| { type: 'resetDialogResponse'; requestId: number; action: 'confirm' | 'cancel' }
 	| { type: 'webviewLog'; message: string; details: unknown; level: 'info' | 'warn' | 'error' };
 
 export function parseWebviewMessage(value: unknown): WebviewMessage | undefined {
@@ -39,6 +40,10 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
 			return { type: message.type };
 		case 'requestResetToCheckpoint':
 			return typeof message.checkpointId === 'string' ? { type: 'requestResetToCheckpoint', checkpointId: message.checkpointId } : undefined;
+		case 'resetDialogResponse':
+			return typeof message.requestId === 'number' && (message.action === 'confirm' || message.action === 'cancel')
+				? { type: 'resetDialogResponse', requestId: message.requestId, action: message.action }
+				: undefined;
 		case 'selectModel':
 			return message.modelKey === undefined || typeof message.modelKey === 'string'
 				? { type: 'selectModel', modelKey: message.modelKey }

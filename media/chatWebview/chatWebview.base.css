@@ -27,3 +27,78 @@ body {
 	box-sizing: border-box;
 	width: 100%;
 }
+.modal-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background: rgba(0, 0, 0, 0.35);
+}
+.webview-modal {
+	box-sizing: border-box;
+	display: flex;
+	gap: 12px;
+	width: min(480px, 100%);
+	padding: 18px;
+	border: 1px solid var(--vscode-panel-border, var(--vscode-sideBar-border));
+	border-radius: 10px;
+	background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+	box-shadow: 0 8px 28px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.55));
+}
+.modal-icon {
+	flex: 0 0 auto;
+	width: 10px;
+	height: 10px;
+	margin-top: 7px;
+	border-radius: 999px;
+	background: var(--vscode-notificationsInfoIcon-foreground, var(--vscode-foreground));
+}
+.modal-icon.warning {
+	background: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-editorWarning-foreground));
+}
+.modal-icon.error {
+	background: var(--vscode-notificationsErrorIcon-foreground, var(--vscode-errorForeground));
+}
+.modal-content {
+	min-width: 0;
+	flex: 1;
+}
+.modal-title {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.4;
+}
+.modal-detail {
+	margin: 10px 0 0;
+	white-space: pre-wrap;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	line-height: 1.45;
+}
+.modal-detail:empty {
+	display: none;
+}
+.modal-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 18px;
+}
+.modal-button {
+	width: auto;
+	min-width: 78px;
+	min-height: 28px;
+	padding: 4px 12px;
+}
+.modal-button.secondary {
+	color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+	background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+}
+.modal-button.secondary:hover {
+	background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground));
+}
