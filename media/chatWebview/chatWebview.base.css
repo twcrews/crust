@@ -27,6 +27,9 @@ body {
 	box-sizing: border-box;
 	width: 100%;
 }
+.modal-backdrop.hidden {
+	display: none;
+}
 .modal-backdrop {
 	position: fixed;
 	inset: 0;

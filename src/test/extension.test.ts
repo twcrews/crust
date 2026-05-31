@@ -941,6 +941,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(html, /id="modal-backdrop"[\s\S]*role="dialog"[\s\S]*aria-modal="true"/);
 		assert.match(mainSource, /case "resetDialog":[\s\S]*showModal\(message\);/);
 		assert.match(mainSource, /function respondToModal\(action\) \{[\s\S]*vscode\.postMessage\(\{ type: "resetDialogResponse", requestId, action \}\);/);
+		assert.match(baseCss, /\.modal-backdrop\.hidden \{\s*display: none;\s*\}/);
 		assert.match(baseCss, /\.modal-backdrop \{[\s\S]*position: fixed;[\s\S]*background: rgba\(0, 0, 0, 0\.35\);/);
 		assert.match(panelSource, /this\.post\(\{ type: 'resetDialog', requestId, \.\.\.options \}\);/);
 		assert.doesNotMatch(panelSource, /showWarningMessage\('Reset code to this point\?', \{ modal: true/);
