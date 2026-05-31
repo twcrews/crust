@@ -84,6 +84,34 @@ export type UnsafeMutationArgs = {
 	description?: string;
 };
 
+export type ResetFileChange = {
+	path: string;
+	absolutePath: string;
+	target: FileSnapshot;
+	expectedCurrent?: FileSnapshot;
+	current?: FileSnapshot;
+};
+
+export type ResetStats = {
+	affectedFileCount: number;
+	addedLineCount: number;
+	removedLineCount: number;
+};
+
+export type ResetConflict = {
+	path: string;
+	reason: 'current-hash-mismatch' | 'missing-snapshot' | 'io-error';
+	message: string;
+};
+
+export type ResetPlan = {
+	checkpointId: string;
+	affectedFiles: ResetFileChange[];
+	stats: ResetStats;
+	conflicts: ResetConflict[];
+	unsafeMutationCount: number;
+};
+
 type ReversionStorageContext = {
 	globalStorageUri: vscode.Uri;
 	workspaceStorageUri?: vscode.Uri;
@@ -206,6 +234,79 @@ export class ReversionManager {
 		});
 		checkpoint.unsafeMutationCount = checkpoint.unsafeMutations.length;
 		await this.persistCheckpointUpdate(checkpoint);
+	}
+
+	async buildResetPlan(checkpointId: string): Promise<ResetPlan> {
+		const targetCheckpoint = await this.getCheckpoint(checkpointId);
+		if (!targetCheckpoint) {
+			throw new Error(`Reversion checkpoint not found: ${checkpointId}`);
+		}
+
+		const summaries = (await this.listCheckpoints(targetCheckpoint.sessionPath, targetCheckpoint.workspaceRoot))
+			.filter((summary) => summary.promptIndex >= targetCheckpoint.promptIndex)
+			.sort((left, right) => left.promptIndex - right.promptIndex || left.createdAt.localeCompare(right.createdAt));
+		const checkpoints = (await Promise.all(summaries.map((summary) => this.getCheckpoint(summary.id))))
+			.filter((checkpoint): checkpoint is ReversionCheckpoint => checkpoint !== undefined);
+		const changesByPath = new Map<string, ResetFileChange>();
+		let unsafeMutationCount = 0;
+
+		for (const checkpoint of checkpoints) {
+			unsafeMutationCount += checkpoint.unsafeMutationCount;
+			for (const mutation of checkpoint.mutations) {
+				const existing = changesByPath.get(mutation.absolutePath);
+				if (!existing) {
+					changesByPath.set(mutation.absolutePath, {
+						path: mutation.path,
+						absolutePath: mutation.absolutePath,
+						target: mutation.before,
+						expectedCurrent: mutation.after,
+					});
+					continue;
+				}
+				existing.expectedCurrent = mutation.after ?? existing.expectedCurrent;
+			}
+		}
+
+		const affectedFiles: ResetFileChange[] = [];
+		const conflicts: ResetConflict[] = [];
+		let addedLineCount = 0;
+		let removedLineCount = 0;
+
+		for (const change of changesByPath.values()) {
+			if (!change.expectedCurrent) {
+				conflicts.push({ path: change.path, reason: 'missing-snapshot', message: `Missing post-change snapshot for ${change.path}.` });
+				continue;
+			}
+			try {
+				const current = await this.readFileSnapshot(change.absolutePath);
+				change.current = current;
+				if (snapshotsEqual(current, change.target)) {
+					continue;
+				}
+				if (!snapshotsEqual(current, change.expectedCurrent)) {
+					conflicts.push({ path: change.path, reason: 'current-hash-mismatch', message: `${change.path} has changed since Crust last tracked it.` });
+					continue;
+				}
+				const lineStats = getLineChangeStats(current, change.target);
+				addedLineCount += lineStats.added;
+				removedLineCount += lineStats.removed;
+				affectedFiles.push(change);
+			} catch (error) {
+				conflicts.push({ path: change.path, reason: 'io-error', message: `Unable to inspect ${change.path}: ${error instanceof Error ? error.message : String(error)}` });
+			}
+		}
+
+		return {
+			checkpointId,
+			affectedFiles,
+			stats: {
+				affectedFileCount: affectedFiles.length,
+				addedLineCount,
+				removedLineCount,
+			},
+			conflicts,
+			unsafeMutationCount,
+		};
 	}
 
 	async readFileSnapshot(absolutePath: string): Promise<FileSnapshot> {
@@ -335,6 +436,52 @@ function getSessionKey(sessionPath: string | undefined): string {
 
 function normalizePath(filePath: string): string {
 	return filePath.replace(/\\/g, '/');
+}
+
+function snapshotsEqual(left: FileSnapshot, right: FileSnapshot): boolean {
+	if (left.exists !== right.exists) {
+		return false;
+	}
+	if (!left.exists) {
+		return true;
+	}
+	return left.hash !== undefined && left.hash === right.hash;
+}
+
+function getLineChangeStats(current: FileSnapshot, target: FileSnapshot): { added: number; removed: number } {
+	if (!current.exists && !target.exists) {
+		return { added: 0, removed: 0 };
+	}
+	if (!current.exists) {
+		return { added: target.lineCount ?? countLines(target.content ?? ''), removed: 0 };
+	}
+	if (!target.exists) {
+		return { added: 0, removed: current.lineCount ?? countLines(current.content ?? '') };
+	}
+	return diffLineCounts(splitLines(current.content ?? ''), splitLines(target.content ?? ''));
+}
+
+function splitLines(content: string): string[] {
+	if (!content) {
+		return [];
+	}
+	return content.endsWith('\n') ? content.slice(0, -1).split('\n') : content.split('\n');
+}
+
+function diffLineCounts(from: string[], to: string[]): { added: number; removed: number } {
+	const previous = new Array<number>(to.length + 1).fill(0);
+	const current = new Array<number>(to.length + 1).fill(0);
+	for (let fromIndex = 1; fromIndex <= from.length; fromIndex++) {
+		for (let toIndex = 1; toIndex <= to.length; toIndex++) {
+			current[toIndex] = from[fromIndex - 1] === to[toIndex - 1]
+				? previous[toIndex - 1] + 1
+				: Math.max(previous[toIndex], current[toIndex - 1]);
+		}
+		previous.splice(0, previous.length, ...current);
+		current.fill(0);
+	}
+	const common = previous[to.length] ?? 0;
+	return { added: to.length - common, removed: from.length - common };
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

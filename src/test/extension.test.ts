@@ -629,6 +629,60 @@ suite('Reversion manager', () => {
 		assert.strictEqual(restored?.unsafeMutations[0]?.description, 'npm test');
 		assert.strictEqual((await manager.listCheckpoints('/tmp/session.jsonl'))[0]?.unsafeMutationCount, 1);
 	});
+
+	test('builds reset plans with affected file and line stats', async () => {
+		const file = join(directory, 'example.ts');
+		await writeFile(file, 'alpha\n');
+		const first = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'First change', promptIndex: 1 });
+		await manager.recordFileMutationStart(first.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'alpha\nbeta\n');
+		await manager.recordFileMutationEnd(first.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+
+		const second = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-2', promptText: 'Second change', promptIndex: 2 });
+		await manager.recordFileMutationStart(second.id, { toolCallId: 'call-2', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'alpha\nbeta\ngamma\n');
+		await manager.recordFileMutationEnd(second.id, { toolCallId: 'call-2', toolName: 'edit', filePath: 'example.ts' });
+
+		const plan = await manager.buildResetPlan(first.id);
+		assert.strictEqual(plan.checkpointId, first.id);
+		assert.strictEqual(plan.stats.affectedFileCount, 1);
+		assert.strictEqual(plan.stats.addedLineCount, 0);
+		assert.strictEqual(plan.stats.removedLineCount, 2);
+		assert.strictEqual(plan.conflicts.length, 0);
+		assert.strictEqual(plan.affectedFiles[0]?.target.content, 'alpha\n');
+		assert.strictEqual(plan.affectedFiles[0]?.expectedCurrent?.content, 'alpha\nbeta\ngamma\n');
+	});
+
+	test('builds no-op reset plans when files already match the target checkpoint', async () => {
+		const file = join(directory, 'example.ts');
+		await writeFile(file, 'before\n');
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		await manager.recordFileMutationStart(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'after\n');
+		await manager.recordFileMutationEnd(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'before\n');
+
+		const plan = await manager.buildResetPlan(checkpoint.id);
+		assert.strictEqual(plan.stats.affectedFileCount, 0);
+		assert.strictEqual(plan.stats.addedLineCount, 0);
+		assert.strictEqual(plan.stats.removedLineCount, 0);
+		assert.strictEqual(plan.conflicts.length, 0);
+	});
+
+	test('reports reset conflicts when current files changed outside tracked mutations', async () => {
+		const file = join(directory, 'example.ts');
+		await writeFile(file, 'before\n');
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		await manager.recordFileMutationStart(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'after\n');
+		await manager.recordFileMutationEnd(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'manual edit\n');
+
+		const plan = await manager.buildResetPlan(checkpoint.id);
+		assert.strictEqual(plan.stats.affectedFileCount, 0);
+		assert.strictEqual(plan.conflicts.length, 1);
+		assert.strictEqual(plan.conflicts[0]?.reason, 'current-hash-mismatch');
+	});
 });
 
 suite('Usage status formatting', () => {
