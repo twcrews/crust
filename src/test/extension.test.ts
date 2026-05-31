@@ -14,6 +14,7 @@ import { restoreSessionMessages } from '../ui/sessionRestoreRenderer';
 import { getBuiltinSlashCommands, getPiChangelogMarkdown, markUnsupportedBuiltinSlashCommands, orderSlashCommands } from '../ui/slashCommands';
 import { StreamingEventRenderer } from '../ui/streamingEventRenderer';
 import { getPathSuggestions } from '../ui/pathAutocomplete';
+import { countLines, hashContent, ReversionManager } from '../ui/reversionManager';
 import { getSessionDirectoryForCwd, listSessions, listSessionsForCwd } from '../ui/sessionHistory';
 import { getChatWebviewHtml } from '../ui/chatWebview';
 import { parseWebviewMessage } from '../ui/chatTypes';
@@ -538,6 +539,62 @@ suite('Tool utilities', () => {
 		assert.strictEqual(getToolResultText({ details: { stdout: 'out', stderr: 'err' } }), 'out\nerr');
 		assert.strictEqual(getToolResultText({ details: { output: 'out', stdout: 'ignored?' } }), 'out\nignored?');
 		assert.strictEqual(getToolResultText(undefined), undefined);
+	});
+});
+
+suite('Reversion manager', () => {
+	let directory: string;
+	let storageDirectory: string;
+	let manager: ReversionManager;
+
+	setup(async () => {
+		directory = await mkdtemp(join(tmpdir(), 'crust-reversion-workspace-'));
+		storageDirectory = await mkdtemp(join(tmpdir(), 'crust-reversion-storage-'));
+		manager = new ReversionManager({
+			globalStorageUri: vscode.Uri.file(join(storageDirectory, 'global')),
+			workspaceStorageUri: vscode.Uri.file(join(storageDirectory, 'workspace')),
+		}, directory);
+	});
+
+	teardown(async () => {
+		await rm(directory, { recursive: true, force: true });
+		await rm(storageDirectory, { recursive: true, force: true });
+	});
+
+	test('creates and persists prompt checkpoints', async () => {
+		const first = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'First prompt', promptIndex: 1 });
+		const second = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-2', promptText: 'Second prompt', promptIndex: 2 });
+
+		assert.strictEqual(first.promptText, 'First prompt');
+		assert.strictEqual(first.workspaceRoot, directory);
+		assert.strictEqual(first.mutationCount, 0);
+		assert.strictEqual(first.unsafeMutationCount, 0);
+
+		const restored = await manager.getCheckpoint(first.id);
+		assert.strictEqual(restored?.id, first.id);
+		assert.deepStrictEqual(restored?.mutations, []);
+		assert.deepStrictEqual(restored?.unsafeMutations, []);
+
+		const reloaded = new ReversionManager({
+			globalStorageUri: vscode.Uri.file(join(storageDirectory, 'global')),
+			workspaceStorageUri: vscode.Uri.file(join(storageDirectory, 'workspace')),
+		}, directory);
+		const checkpoints = await reloaded.listCheckpoints('/tmp/session.jsonl');
+		assert.deepStrictEqual(checkpoints.map((checkpoint) => checkpoint.id), [first.id, second.id]);
+	});
+
+	test('reads file snapshots with hashes and line counts', async () => {
+		const file = join(directory, 'example.txt');
+		await writeFile(file, 'alpha\nbeta\n');
+
+		const snapshot = await manager.readFileSnapshot(file);
+		assert.strictEqual(snapshot.exists, true);
+		assert.strictEqual(snapshot.content, 'alpha\nbeta\n');
+		assert.strictEqual(snapshot.hash, hashContent('alpha\nbeta\n'));
+		assert.strictEqual(snapshot.lineCount, 2);
+		assert.strictEqual(countLines('one\ntwo'), 2);
+		assert.strictEqual(countLines('one\ntwo\n'), 2);
+		assert.deepStrictEqual(await manager.readFileSnapshot(join(directory, 'missing.txt')), { exists: false });
 	});
 });
 
