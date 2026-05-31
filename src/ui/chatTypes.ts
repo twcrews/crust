@@ -12,6 +12,7 @@ export type WebviewMessage =
 	| { type: 'openProjectFile'; path: string }
 	| { type: 'validateFileReferences'; requestId: number; references: string[] }
 	| { type: 'refreshSlashCommands' }
+	| { type: 'requestResetToCheckpoint'; checkpointId: string }
 	| { type: 'webviewLog'; message: string; details: unknown; level: 'info' | 'warn' | 'error' };
 
 export function parseWebviewMessage(value: unknown): WebviewMessage | undefined {
@@ -36,6 +37,8 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | undefined 
 		case 'newChat':
 		case 'refreshSlashCommands':
 			return { type: message.type };
+		case 'requestResetToCheckpoint':
+			return typeof message.checkpointId === 'string' ? { type: 'requestResetToCheckpoint', checkpointId: message.checkpointId } : undefined;
 		case 'selectModel':
 			return message.modelKey === undefined || typeof message.modelKey === 'string'
 				? { type: 'selectModel', modelKey: message.modelKey }

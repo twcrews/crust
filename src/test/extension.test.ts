@@ -264,6 +264,7 @@ suite('Webview message parsing', () => {
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'selectModel' }), { type: 'selectModel', modelKey: undefined });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'openProjectFile', path: 'src/ui/chatPanel.ts:12' }), { type: 'openProjectFile', path: 'src/ui/chatPanel.ts:12' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'validateFileReferences', requestId: 1, references: ['src/ui/chatPanel.ts', 2] }), { type: 'validateFileReferences', requestId: 1, references: ['src/ui/chatPanel.ts'] });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'requestResetToCheckpoint', checkpointId: 'checkpoint-1' }), { type: 'requestResetToCheckpoint', checkpointId: 'checkpoint-1' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'debug' }), { type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'info' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'failed', level: 'error' }), { type: 'webviewLog', message: 'failed', details: undefined, level: 'error' });
 	});
@@ -276,6 +277,7 @@ suite('Webview message parsing', () => {
 		assert.strictEqual(parseWebviewMessage({ type: 'pathAutocomplete', requestId: '1', query: 'src' }), undefined);
 		assert.strictEqual(parseWebviewMessage({ type: 'openProjectFile', path: 1 }), undefined);
 		assert.strictEqual(parseWebviewMessage({ type: 'validateFileReferences', requestId: '1', references: [] }), undefined);
+		assert.strictEqual(parseWebviewMessage({ type: 'requestResetToCheckpoint', checkpointId: 1 }), undefined);
 		assert.strictEqual(parseWebviewMessage({ type: 'unknown' }), undefined);
 	});
 });
@@ -881,10 +883,23 @@ suite('Webview HTML and nonce generation', () => {
 	test('renders user messages with context labels and markdown bodies', async () => {
 		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
 
-		assert.match(source, /function renderUserMessage\(element, text, ideContextLabel, slashCommandLabel\)[\s\S]*appendMessageContext\(element, ideContextLabel, ideContextLabel, createEyeIcon\(\)\);/);
+		assert.match(source, /function renderUserMessage\(element, text, ideContextLabel, slashCommandLabel, checkpointId\)[\s\S]*appendMessageContext\(element, ideContextLabel, ideContextLabel, createEyeIcon\(\)\);/);
 		assert.match(source, /slashCommandLabel\.startsWith\("\/skill:"\) \? "Skill: " \+ slashCommandLabel\.slice\(7\) : "Slash command: " \+ slashCommandLabel/);
 		assert.match(source, /if \(text\) \{[\s\S]*setMarkdownContent\(body, text\);[\s\S]*\}/);
 		assert.match(source, /element\.classList\.contains\("user"\)[\s\S]*setMarkdownContent\(body, \(body\.dataset\.markdown \?\? ""\) \+ text\);[\s\S]*initUserMessageToggle\(element\);/);
+	});
+
+	test('renders checkpoint reset buttons on user messages with checkpoints', async () => {
+		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
+		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
+		const css = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.messages.css'), 'utf8');
+
+		assert.match(source, /if \(checkpointId\) \{[\s\S]*element\.dataset\.checkpointId = checkpointId;[\s\S]*createResetCheckpointButton\(checkpointId\)/);
+		assert.match(source, /button\.className = "reset-checkpoint-button";[\s\S]*button\.title = "Reset code to this point";[\s\S]*aria-label", "Reset code to this point"/);
+		assert.match(source, /vscode\.postMessage\(\{ type: "requestResetToCheckpoint", checkpointId \}\);/);
+		assert.match(mainSource, /addMessage\(message\.id[\s\S]*message\.compaction === true, message\.checkpointId \?\? ""\);/);
+		assert.match(css, /\.reset-checkpoint-button \{[\s\S]*position: absolute;[\s\S]*right: -9px;[\s\S]*bottom: -9px;/);
+		assert.match(css, /\.user:hover \.reset-checkpoint-button,[\s\S]*\.user:focus-within \.reset-checkpoint-button \{[\s\S]*opacity: 1;/);
 	});
 
 	test('renders compaction messages as expandable shaded bubbles with first-line previews', async () => {
@@ -892,7 +907,7 @@ suite('Webview HTML and nonce generation', () => {
 		const css = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.messages.css'), 'utf8');
 		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
 
-		assert.match(mainSource, /addMessage\(message\.id[\s\S]*message\.compaction === true\);/);
+		assert.match(mainSource, /addMessage\(message\.id[\s\S]*message\.compaction === true, message\.checkpointId \?\? ""\);/);
 		assert.match(source, /function renderCompactionMessage\(element, text\)[\s\S]*setMarkdownContent\(body, previewText \|\| fullText\);[\s\S]*Show full compaction/);
 		assert.match(source, /function getCompactionPreviewText\(markdown\) \{\s*return markdown\.replace\(\/\\r\\n\/g, "\\n"\)\.split\("\\n", 1\)\[0\]\.trim\(\);\s*\}/);
 		assert.match(css, /\.message\.compaction-message \{[\s\S]*border-radius: 10px;[\s\S]*background: var\(--vscode-editor-inactiveSelectionBackground\);/);

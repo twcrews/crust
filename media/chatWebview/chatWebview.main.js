@@ -362,7 +362,7 @@ window.addEventListener("message", (event) => {
 			if (message.role === "user") {
 				recordPromptHistory(message.text ?? "");
 			}
-			addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "", message.slashCommandLabel ?? "", message.secondary === true, message.error === true, message.compaction === true);
+			addMessage(message.id, message.role, message.text ?? "", message.loading ?? false, message.ideContextLabel ?? "", message.slashCommandLabel ?? "", message.secondary === true, message.error === true, message.compaction === true, message.checkpointId ?? "");
 			break;
 		case "appendMessage":
 			appendMessage(message.id, message.text, message.error === true);

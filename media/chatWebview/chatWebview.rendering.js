@@ -25,7 +25,7 @@ function setModels(models, selected) {
 	}
 }
 
-function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel, secondary, error, compaction) {
+function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel, secondary, error, compaction, checkpointId) {
 	const element = document.createElement("div");
 	element.id = id;
 	element.className = "message " + role + (loading ? " loading" : "") + (secondary ? " secondary" : "") + (error ? " error-message" : "") + (compaction ? " compaction-message" : "");
@@ -34,7 +34,7 @@ function addMessage(id, role, text, loading, ideContextLabel, slashCommandLabel,
 	} else if (role === "assistant" && !loading) {
 		setMarkdownContent(element, text);
 	} else if (role === "user") {
-		renderUserMessage(element, text, ideContextLabel, slashCommandLabel);
+		renderUserMessage(element, text, ideContextLabel, slashCommandLabel, checkpointId);
 	} else {
 		element.textContent = text;
 	}
@@ -78,7 +78,7 @@ function getCompactionPreviewText(markdown) {
 	return markdown.replace(/\r\n/g, "\n").split("\n", 1)[0].trim();
 }
 
-function renderUserMessage(element, text, ideContextLabel, slashCommandLabel) {
+function renderUserMessage(element, text, ideContextLabel, slashCommandLabel, checkpointId) {
 	if (ideContextLabel) {
 		appendMessageContext(element, ideContextLabel, ideContextLabel, createEyeIcon());
 	}
@@ -107,6 +107,44 @@ function renderUserMessage(element, text, ideContextLabel, slashCommandLabel) {
 		finishContentUpdate();
 	});
 	element.append(toggle);
+
+	if (checkpointId) {
+		element.dataset.checkpointId = checkpointId;
+		element.append(createResetCheckpointButton(checkpointId));
+	}
+}
+
+function createResetCheckpointButton(checkpointId) {
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "reset-checkpoint-button";
+	button.title = "Reset code to this point";
+	button.setAttribute("aria-label", "Reset code to this point");
+	button.append(createResetIcon());
+	button.addEventListener("click", (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		vscode.postMessage({ type: "requestResetToCheckpoint", checkpointId });
+	});
+	return button;
+}
+
+function createResetIcon() {
+	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	svg.setAttribute("aria-hidden", "true");
+	svg.setAttribute("width", "14");
+	svg.setAttribute("height", "14");
+	svg.setAttribute("viewBox", "0 0 16 16");
+	svg.setAttribute("fill", "none");
+
+	const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
+	arrow.setAttribute("d", "M5.25 4.25H2.75V1.75M3 4.1A5.75 5.75 0 1 1 2.25 8");
+	arrow.setAttribute("stroke", "currentColor");
+	arrow.setAttribute("stroke-width", "1.5");
+	arrow.setAttribute("stroke-linecap", "round");
+	arrow.setAttribute("stroke-linejoin", "round");
+	svg.append(arrow);
+	return svg;
 }
 
 function appendMessageContext(element, text, title, icon) {

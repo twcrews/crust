@@ -397,6 +397,9 @@ export class CrustChatPanel implements vscode.Disposable {
 			case 'refreshSlashCommands':
 				await this.refreshSlashCommands();
 				break;
+			case 'requestResetToCheckpoint':
+				await this.resetCodeToCheckpoint(message.checkpointId);
+				break;
 			case 'webviewLog':
 				if (message.level === 'warn' || message.level === 'error') {
 					this.log(`Webview: ${message.message ?? ''}`, message.details, message.level);
@@ -1145,7 +1148,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.conversationState.activeTextMessageIds.clear();
 		this.conversationState.activeAbortIndicatorShown = false;
 		this.conversationState.activeErrorMessageShown = false;
-		this.post({ type: 'addMessage', id: userMessageId, role: 'user', text: displayText, ideContextLabel: ideContext?.label, slashCommandLabel: display?.slashCommandLabel });
+		this.post({ type: 'addMessage', id: userMessageId, role: 'user', text: displayText, ideContextLabel: ideContext?.label, slashCommandLabel: display?.slashCommandLabel, checkpointId: checkpoint.id });
 		this.post({ type: 'addMessage', id: this.conversationState.activeLoadingMessageId, role: 'assistant', text: '', loading: true });
 		this.setProcessing(true);
 		this.conversationState.activeUsageMessage = undefined;
