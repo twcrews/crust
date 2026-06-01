@@ -73,7 +73,9 @@ function requestCancelCurrentTask(source) {
 function setResetRestoreState(checkpointId, message) {
 	resetRestoreCheckpointId = checkpointId || "";
 	resetRestoreMessage.textContent = message || "Code was reset to an earlier point.";
-	resetRestoreBanner.classList.toggle("hidden", !resetRestoreCheckpointId);
+	const visible = Boolean(resetRestoreCheckpointId);
+	resetRestoreBanner.classList.toggle("hidden", !visible);
+	messages.classList.toggle("has-reset-restore-banner", visible);
 }
 
 resetRestoreButton.addEventListener("click", () => {
@@ -81,6 +83,10 @@ resetRestoreButton.addEventListener("click", () => {
 		return;
 	}
 	vscode.postMessage({ type: "requestResetToCheckpoint", checkpointId: resetRestoreCheckpointId });
+});
+
+resetRestoreDismiss.addEventListener("click", () => {
+	setResetRestoreState("", "");
 });
 
 function showModal(message) {

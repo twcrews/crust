@@ -26,6 +26,7 @@ const followChat = document.getElementById("follow-chat");
 const resetRestoreBanner = document.getElementById("reset-restore-banner");
 const resetRestoreMessage = document.getElementById("reset-restore-message");
 const resetRestoreButton = document.getElementById("reset-restore-button");
+const resetRestoreDismiss = document.getElementById("reset-restore-dismiss");
 const modalBackdrop = document.getElementById("modal-backdrop");
 const modalTitle = document.getElementById("modal-title");
 const modalDetail = document.getElementById("modal-detail");

@@ -69,7 +69,15 @@
 		<form id="form" class="controls">
 			<div id="reset-restore-banner" class="reset-restore-banner hidden" role="status">
 				<span id="reset-restore-message">Code was reset to an earlier point.</span>
-				<button id="reset-restore-button" class="reset-restore-button" type="button">Restore code from before reset</button>
+				<div class="reset-restore-actions">
+					<button id="reset-restore-button" class="reset-restore-button" type="button">Undo</button>
+					<button id="reset-restore-dismiss" class="reset-restore-dismiss" type="button" aria-label="Dismiss restore code banner" title="Dismiss">
+						<svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<path d="M4 4L12 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+							<path d="M12 4L4 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+						</svg>
+					</button>
+				</div>
 			</div>
 			<div class="input-row">
 				<div class="prompt-column">

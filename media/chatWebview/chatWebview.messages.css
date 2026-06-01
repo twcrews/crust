@@ -5,6 +5,9 @@
 	scroll-behavior: smooth;
 	padding: 16px var(--chat-horizontal-padding) var(--controls-overlay-space);
 }
+.messages.has-reset-restore-banner {
+	padding-bottom: calc(var(--controls-overlay-space) + 48px);
+}
 
 .empty-state {
 	position: absolute;

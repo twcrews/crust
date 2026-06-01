@@ -1071,12 +1071,15 @@ suite('Webview HTML and nonce generation', () => {
 		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
 		const stateSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.state.js'), 'utf8');
 		const controlsCss = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.controls.css'), 'utf8');
+		const messagesCss = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.messages.css'), 'utf8');
 		const panelSource = await readFile(resolve(__dirname, '..', '..', 'src', 'ui', 'chatPanel.ts'), 'utf8');
 
-		assert.match(html, /id="reset-restore-banner"[\s\S]*Restore code from before reset/);
-		assert.match(stateSource, /const resetRestoreBanner = document\.getElementById\("reset-restore-banner"\);[\s\S]*let resetRestoreCheckpointId = "";/);
-		assert.match(mainSource, /function setResetRestoreState\(checkpointId, message\)[\s\S]*resetRestoreBanner\.classList\.toggle\("hidden", !resetRestoreCheckpointId\);/);
+		assert.match(html, /id="reset-restore-banner"[\s\S]*id="reset-restore-button"[\s\S]*>Undo<[\s\S]*id="reset-restore-dismiss"/);
+		assert.match(stateSource, /const resetRestoreBanner = document\.getElementById\("reset-restore-banner"\);[\s\S]*const resetRestoreDismiss = document\.getElementById\("reset-restore-dismiss"\);[\s\S]*let resetRestoreCheckpointId = "";/);
+		assert.match(mainSource, /function setResetRestoreState\(checkpointId, message\)[\s\S]*messages\.classList\.toggle\("has-reset-restore-banner", visible\);/);
 		assert.match(mainSource, /resetRestoreButton\.addEventListener\("click"[\s\S]*vscode\.postMessage\(\{ type: "requestResetToCheckpoint", checkpointId: resetRestoreCheckpointId \}\);/);
+		assert.match(mainSource, /resetRestoreDismiss\.addEventListener\("click"[\s\S]*setResetRestoreState\("", ""\);/);
+		assert.match(messagesCss, /\.messages\.has-reset-restore-banner \{\s*padding-bottom: calc\(var\(--controls-overlay-space\) \+ 48px\);\s*\}/);
 		assert.match(mainSource, /case "resetRestoreState":[\s\S]*setResetRestoreState\(message\.checkpointId, message\.message\);/);
 		const bannerCss = controlsCss.match(/\.reset-restore-banner \{[\s\S]*?\n\}/)?.[0] ?? '';
 		assert.match(bannerCss, /background: var\(--vscode-editorWidget-background/);
