@@ -702,6 +702,35 @@ suite('Reversion manager', () => {
 		assert.strictEqual(plan.conflicts[0]?.reason, 'current-hash-mismatch');
 	});
 
+	test('ignores checkpoints from unrelated sessions when building reset plans', async () => {
+		const file = join(directory, 'example.ts');
+		await writeFile(file, 'before\n');
+		const target = await manager.createCheckpoint({ sessionPath: '/tmp/session-a.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		await manager.recordFileMutationStart(target.id, { toolCallId: 'call-a', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'after session a\n');
+		await manager.recordFileMutationEnd(target.id, { toolCallId: 'call-a', toolName: 'edit', filePath: 'example.ts' });
+
+		const unrelated = await manager.createCheckpoint({ sessionPath: '/tmp/session-b.jsonl', promptMessageId: 'user-2', promptText: 'Unrelated change', promptIndex: 2 });
+		await manager.recordFileMutationStart(unrelated.id, { toolCallId: 'call-b', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'after unrelated session\n');
+		await manager.recordFileMutationEnd(unrelated.id, { toolCallId: 'call-b', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'after session a\n');
+
+		const plan = await manager.buildResetPlan(target.id);
+		assert.strictEqual(plan.conflicts.length, 0);
+		assert.strictEqual(plan.stats.affectedFileCount, 1);
+		assert.strictEqual(plan.affectedFiles[0]?.expectedCurrent?.content, 'after session a\n');
+	});
+
+	test('moves unsaved checkpoints to a session path once the path is known', async () => {
+		const checkpoint = await manager.createCheckpoint({ promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+
+		await manager.updateCheckpointSessionPath(checkpoint.id, '/tmp/session.jsonl');
+
+		assert.strictEqual((await manager.getCheckpoint(checkpoint.id))?.sessionPath, '/tmp/session.jsonl');
+		assert.deepStrictEqual((await manager.listCheckpoints('/tmp/session.jsonl')).map((summary) => summary.id), [checkpoint.id]);
+	});
+
 	test('applies reset plans and records a safety checkpoint', async () => {
 		const file = join(directory, 'example.ts');
 		await writeFile(file, 'before\n');

@@ -173,6 +173,15 @@ export class ReversionManager {
 		return Object.values(workspace.sessions).flatMap((session) => session.checkpoints);
 	}
 
+	async updateCheckpointSessionPath(checkpointId: string, sessionPath: string): Promise<void> {
+		const checkpoint = await this.getCheckpoint(checkpointId);
+		if (!checkpoint || checkpoint.sessionPath === sessionPath) {
+			return;
+		}
+		checkpoint.sessionPath = sessionPath;
+		await this.persistCheckpointUpdate(checkpoint);
+	}
+
 	async recordFileMutationStart(checkpointId: string, args: FileMutationArgs): Promise<void> {
 		const checkpoint = await this.getCheckpoint(checkpointId);
 		if (!checkpoint) {
@@ -265,7 +274,7 @@ export class ReversionManager {
 			throw new Error(`Reversion checkpoint not found: ${checkpointId}`);
 		}
 
-		const summaries = (await this.listCheckpoints(targetCheckpoint.sessionPath, targetCheckpoint.workspaceRoot))
+		const summaries = (await this.listSessionCheckpoints(targetCheckpoint.sessionPath, targetCheckpoint.workspaceRoot))
 			.filter((summary) => summary.promptIndex >= targetCheckpoint.promptIndex)
 			.sort((left, right) => left.promptIndex - right.promptIndex || left.createdAt.localeCompare(right.createdAt));
 		const checkpoints = (await Promise.all(summaries.map((summary) => this.getCheckpoint(summary.id))))
@@ -358,7 +367,7 @@ export class ReversionManager {
 		if (!targetCheckpoint) {
 			throw new Error(`Reversion checkpoint not found: ${plan.checkpointId}`);
 		}
-		const summaries = await this.listCheckpoints(targetCheckpoint.sessionPath, targetCheckpoint.workspaceRoot);
+		const summaries = await this.listSessionCheckpoints(targetCheckpoint.sessionPath, targetCheckpoint.workspaceRoot);
 		const promptIndex = Math.max(0, ...summaries.map((summary) => summary.promptIndex)) + 1;
 		const checkpoint = await this.createCheckpoint({
 			sessionPath: targetCheckpoint.sessionPath,
@@ -377,6 +386,12 @@ export class ReversionManager {
 		await this.upsertCheckpointSummary(checkpoint);
 	}
 
+	private async listSessionCheckpoints(sessionPath: string | undefined, workspaceRoot: string): Promise<ReversionCheckpointSummary[]> {
+		const index = await this.readIndex();
+		const workspace = index.workspaces[getWorkspaceKey(workspaceRoot)];
+		return workspace?.sessions[getSessionKey(sessionPath)]?.checkpoints ?? [];
+	}
+
 	private resolveMutationPath(filePath: string, workspaceRoot: string): { absolutePath: string; relativePath: string } {
 		const absolutePath = resolve(workspaceRoot || this.defaultWorkspaceRoot || process.cwd(), filePath);
 		const relativePath = workspaceRoot ? normalizePath(relative(workspaceRoot, absolutePath)) : normalizePath(filePath);
@@ -388,10 +403,13 @@ export class ReversionManager {
 		const workspaceKey = getWorkspaceKey(checkpoint.workspaceRoot);
 		const sessionKey = getSessionKey(checkpoint.sessionPath);
 		const workspace = index.workspaces[workspaceKey] ?? { workspaceRoot: checkpoint.workspaceRoot, sessions: {} };
+		for (const existingSession of Object.values(workspace.sessions)) {
+			existingSession.checkpoints = existingSession.checkpoints.filter((existing) => existing.id !== checkpoint.id);
+		}
 		const session = workspace.sessions[sessionKey] ?? { sessionPath: checkpoint.sessionPath, checkpoints: [] };
 		const summary = toSummary(checkpoint);
 
-		const sortedCheckpoints = [...session.checkpoints.filter((existing) => existing.id !== checkpoint.id), summary]
+		const sortedCheckpoints = [...session.checkpoints, summary]
 			.sort((left, right) => left.promptIndex - right.promptIndex || left.createdAt.localeCompare(right.createdAt));
 		const prunedCheckpoints = sortedCheckpoints.slice(0, Math.max(0, sortedCheckpoints.length - maxCheckpointsPerSession));
 		session.checkpoints = sortedCheckpoints.slice(-maxCheckpointsPerSession);

@@ -1037,6 +1037,9 @@ export class CrustChatPanel implements vscode.Disposable {
 	private async postCurrentSessionPath(): Promise<void> {
 		try {
 			const sessionPath = getSessionPath(await this.client.getState());
+			if (sessionPath && this.activeReversionCheckpointId) {
+				await this.reversionManager.updateCheckpointSessionPath(this.activeReversionCheckpointId, sessionPath);
+			}
 			this.post({ type: 'sessionPath', sessionPath });
 			this.watchSessionFile(sessionPath);
 		} catch (error) {
@@ -1221,6 +1224,9 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private async resetCodeToCheckpoint(checkpointId: string): Promise<void> {
+		if (this.activeSessionPath) {
+			await this.reversionManager.updateCheckpointSessionPath(checkpointId, this.activeSessionPath);
+		}
 		if (this.conversationState.isProcessing) {
 			await this.showResetDialog({ title: 'Wait for the current response to finish before resetting code.', confirmLabel: 'OK', severity: 'info' });
 			return;
