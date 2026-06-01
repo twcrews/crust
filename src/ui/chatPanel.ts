@@ -432,7 +432,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				await this.refreshSlashCommands();
 				break;
 			case 'requestResetToCheckpoint':
-				await this.resetCodeToCheckpoint(message.checkpointId);
+				await this.resetCodeToCheckpoint(message.checkpointId, { skipConfirmation: message.skipConfirmation });
 				break;
 			case 'resetDialogResponse':
 				this.resolveResetDialog(message.requestId, message.action === 'confirm');
@@ -1271,8 +1271,8 @@ export class CrustChatPanel implements vscode.Disposable {
 		}
 	}
 
-	private async resetCodeToCheckpoint(checkpointId: string): Promise<void> {
-		this.log('Reset checkpoint requested', { checkpointId, activeSessionPath: this.activeSessionPath, cwd: this.cwd });
+	private async resetCodeToCheckpoint(checkpointId: string, options: { skipConfirmation?: boolean } = {}): Promise<void> {
+		this.log('Reset checkpoint requested', { checkpointId, activeSessionPath: this.activeSessionPath, cwd: this.cwd, skipConfirmation: options.skipConfirmation === true });
 		if (this.activeSessionPath) {
 			await this.reversionManager.updateCheckpointSessionPath(checkpointId, this.activeSessionPath);
 		}
@@ -1319,9 +1319,11 @@ export class CrustChatPanel implements vscode.Disposable {
 				`Lines to be removed: ${plan.stats.removedLineCount}`,
 				plan.unsafeMutationCount ? `Warning: ${plan.unsafeMutationCount} shell command${plan.unsafeMutationCount === 1 ? '' : 's'} ran after this point. Some changes may not be tracked.` : undefined,
 			].filter((line): line is string => Boolean(line)).join('\n');
-			const confirmed = await this.showResetDialog({ title: 'Reset code to this point?', detail, confirmLabel: 'Reset Code', cancelLabel: 'Cancel', severity: 'warning' });
-			if (!confirmed) {
-				return;
+			if (!options.skipConfirmation) {
+				const confirmed = await this.showResetDialog({ title: 'Reset code to this point?', detail, confirmLabel: 'Reset Code', cancelLabel: 'Cancel', severity: 'warning' });
+				if (!confirmed) {
+					return;
+				}
 			}
 			const appliedPlan = await this.reversionManager.applyResetPlan(plan);
 			this.post({ type: 'status', message: `Reset ${appliedPlan.stats.affectedFileCount} file${appliedPlan.stats.affectedFileCount === 1 ? '' : 's'}.` });

@@ -264,7 +264,8 @@ suite('Webview message parsing', () => {
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'selectModel' }), { type: 'selectModel', modelKey: undefined });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'openProjectFile', path: 'src/ui/chatPanel.ts:12' }), { type: 'openProjectFile', path: 'src/ui/chatPanel.ts:12' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'validateFileReferences', requestId: 1, references: ['src/ui/chatPanel.ts', 2] }), { type: 'validateFileReferences', requestId: 1, references: ['src/ui/chatPanel.ts'] });
-		assert.deepStrictEqual(parseWebviewMessage({ type: 'requestResetToCheckpoint', checkpointId: 'checkpoint-1' }), { type: 'requestResetToCheckpoint', checkpointId: 'checkpoint-1' });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'requestResetToCheckpoint', checkpointId: 'checkpoint-1' }), { type: 'requestResetToCheckpoint', checkpointId: 'checkpoint-1', skipConfirmation: false });
+		assert.deepStrictEqual(parseWebviewMessage({ type: 'requestResetToCheckpoint', checkpointId: 'checkpoint-1', skipConfirmation: true }), { type: 'requestResetToCheckpoint', checkpointId: 'checkpoint-1', skipConfirmation: true });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'resetDialogResponse', requestId: 7, action: 'confirm' }), { type: 'resetDialogResponse', requestId: 7, action: 'confirm' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'debug' }), { type: 'webviewLog', message: 'loaded', details: { ok: true }, level: 'info' });
 		assert.deepStrictEqual(parseWebviewMessage({ type: 'webviewLog', message: 'failed', level: 'error' }), { type: 'webviewLog', message: 'failed', details: undefined, level: 'error' });
@@ -1077,7 +1078,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(html, /id="reset-restore-banner"[\s\S]*id="reset-restore-button"[\s\S]*>Undo<[\s\S]*id="reset-restore-dismiss"/);
 		assert.match(stateSource, /const resetRestoreBanner = document\.getElementById\("reset-restore-banner"\);[\s\S]*const resetRestoreDismiss = document\.getElementById\("reset-restore-dismiss"\);[\s\S]*let resetRestoreCheckpointId = "";/);
 		assert.match(mainSource, /function setResetRestoreState\(checkpointId, message\)[\s\S]*messages\.classList\.toggle\("has-reset-restore-banner", visible\);/);
-		assert.match(mainSource, /resetRestoreButton\.addEventListener\("click"[\s\S]*vscode\.postMessage\(\{ type: "requestResetToCheckpoint", checkpointId: resetRestoreCheckpointId \}\);/);
+		assert.match(mainSource, /resetRestoreButton\.addEventListener\("click"[\s\S]*setResetRestoreState\("", ""\);[\s\S]*vscode\.postMessage\(\{ type: "requestResetToCheckpoint", checkpointId, skipConfirmation: true \}\);/);
 		assert.match(mainSource, /resetRestoreDismiss\.addEventListener\("click"[\s\S]*setResetRestoreState\("", ""\);/);
 		assert.match(messagesCss, /\.messages\.has-reset-restore-banner \{\s*padding-bottom: calc\(var\(--controls-overlay-space\) \+ 48px\);\s*\}/);
 		assert.match(mainSource, /case "resetRestoreState":[\s\S]*setResetRestoreState\(message\.checkpointId, message\.message\);/);
@@ -1087,6 +1088,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.doesNotMatch(bannerCss, /position: absolute;/);
 		assert.match(panelSource, /this\.post\(\{ type: 'resetRestoreState', checkpointId, message: checkpointId \? 'Code was reset to an earlier point\.' : undefined \}\);/);
 		assert.match(panelSource, /this\.postResetRestoreState\(appliedPlan\.safetyCheckpointId\);/);
+		assert.match(panelSource, /if \(!options\.skipConfirmation\) \{[\s\S]*showResetDialog\(\{ title: 'Reset code to this point\?'/);
 	});
 
 	test('renders reset confirmations as webview modals', async () => {

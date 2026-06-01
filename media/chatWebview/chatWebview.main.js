@@ -82,7 +82,9 @@ resetRestoreButton.addEventListener("click", () => {
 	if (!resetRestoreCheckpointId) {
 		return;
 	}
-	vscode.postMessage({ type: "requestResetToCheckpoint", checkpointId: resetRestoreCheckpointId });
+	const checkpointId = resetRestoreCheckpointId;
+	setResetRestoreState("", "");
+	vscode.postMessage({ type: "requestResetToCheckpoint", checkpointId, skipConfirmation: true });
 });
 
 resetRestoreDismiss.addEventListener("click", () => {
