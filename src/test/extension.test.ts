@@ -647,6 +647,22 @@ suite('Reversion manager', () => {
 		assert.strictEqual((await manager.getCheckpoint('checkpoint-legacy'))?.promptIndex, 1);
 	});
 
+	test('repairs bad version-two prompt indexes from session prompt text', async () => {
+		const sessionPath = join(directory, 'session.jsonl');
+		await writeFile(sessionPath, [
+			JSON.stringify({ type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'First prompt' }] } }),
+			JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'Done' }] } }),
+			JSON.stringify({ type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'Second prompt' }] } }),
+		].join('\n'), 'utf8');
+		const badFirst = await manager.createCheckpoint({ sessionPath, promptMessageId: 'user-1', promptText: 'First prompt', promptIndex: 2 });
+		const second = await manager.createCheckpoint({ sessionPath, promptMessageId: 'user-2', promptText: 'Second prompt', promptIndex: 1 });
+
+		const checkpoints = await manager.listCheckpoints(sessionPath);
+		assert.deepStrictEqual(checkpoints.map((checkpoint) => [checkpoint.promptText, checkpoint.promptIndex]), [['First prompt', 0], ['Second prompt', 1]]);
+		assert.strictEqual((await manager.getCheckpoint(badFirst.id))?.promptIndex, 0);
+		assert.strictEqual((await manager.getCheckpoint(second.id))?.promptIndex, 1);
+	});
+
 	test('reads file snapshots with hashes and line counts', async () => {
 		const file = join(directory, 'example.txt');
 		await writeFile(file, 'alpha\nbeta\n');

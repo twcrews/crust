@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import * as vscode from 'vscode';
+import { getMessageRole, getMessageText, parseJsonObject } from './messageUtils';
 
 const reversionVersion = 2;
 const legacyReversionVersion = 1;
@@ -157,10 +158,17 @@ export class ReversionManager {
 		}
 
 		const parsed = JSON.parse(await readFile(file, 'utf8')) as unknown;
-		return normalizeCheckpoint(parsed);
+		const checkpoint = normalizeCheckpoint(parsed);
+		if (!checkpoint) {
+			return undefined;
+		}
+		return this.reconcileCheckpointPromptIndex(checkpoint);
 	}
 
 	async listCheckpoints(sessionPath?: string, workspaceRoot = this.defaultWorkspaceRoot): Promise<ReversionCheckpointSummary[]> {
+		if (sessionPath !== undefined) {
+			await this.reconcileSessionPromptIndexes(sessionPath, workspaceRoot);
+		}
 		const index = await this.readIndex();
 		const workspace = index.workspaces[getWorkspaceKey(workspaceRoot)];
 		if (!workspace) {
@@ -387,7 +395,68 @@ export class ReversionManager {
 		await this.upsertCheckpointSummary(checkpoint);
 	}
 
+	private async reconcileCheckpointPromptIndex(checkpoint: ReversionCheckpoint): Promise<ReversionCheckpoint> {
+		const promptIndex = await inferPromptIndexFromSession(checkpoint.sessionPath, checkpoint.promptText);
+		if (promptIndex === undefined || promptIndex === checkpoint.promptIndex) {
+			return checkpoint;
+		}
+		const updated = { ...checkpoint, promptIndex };
+		await this.persistCheckpointUpdate(updated);
+		return updated;
+	}
+
+	private async reconcileSessionPromptIndexes(sessionPath: string, workspaceRoot: string): Promise<void> {
+		const promptTexts = await readSessionUserPromptTexts(sessionPath);
+		if (!promptTexts.length) {
+			return;
+		}
+		const index = await this.readIndex();
+		const workspace = index.workspaces[getWorkspaceKey(workspaceRoot)];
+		const session = workspace?.sessions[getSessionKey(sessionPath)];
+		if (!session) {
+			return;
+		}
+		const nextIndexesByPromptText = new Map<string, number[]>();
+		promptTexts.forEach((text, index) => {
+			const indexes = nextIndexesByPromptText.get(text) ?? [];
+			indexes.push(index);
+			nextIndexesByPromptText.set(text, indexes);
+		});
+		let changed = false;
+		const sortedSummaries = [...session.checkpoints].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+		const reconciledIndexes = new Map<string, number>();
+		for (const summary of sortedSummaries) {
+			const indexes = nextIndexesByPromptText.get(summary.promptText);
+			const promptIndex = indexes?.shift();
+			if (promptIndex === undefined || promptIndex === summary.promptIndex) {
+				continue;
+			}
+			summary.promptIndex = promptIndex;
+			reconciledIndexes.set(summary.id, promptIndex);
+			changed = true;
+		}
+		if (!changed) {
+			return;
+		}
+		session.checkpoints = sortedSummaries.sort((left, right) => left.promptIndex - right.promptIndex || left.createdAt.localeCompare(right.createdAt));
+		await this.writeIndex(index);
+		await Promise.all([...reconciledIndexes].map(async ([checkpointId, promptIndex]) => {
+			const file = this.getCheckpointPath(checkpointId);
+			if (!existsSync(file)) {
+				return;
+			}
+			const checkpoint = normalizeCheckpoint(JSON.parse(await readFile(file, 'utf8')) as unknown);
+			if (!checkpoint || checkpoint.promptIndex === promptIndex) {
+				return;
+			}
+			await this.writeCheckpoint({ ...checkpoint, promptIndex });
+		}));
+	}
+
 	private async listSessionCheckpoints(sessionPath: string | undefined, workspaceRoot: string): Promise<ReversionCheckpointSummary[]> {
+		if (sessionPath !== undefined) {
+			await this.reconcileSessionPromptIndexes(sessionPath, workspaceRoot);
+		}
 		const index = await this.readIndex();
 		const workspace = index.workspaces[getWorkspaceKey(workspaceRoot)];
 		return workspace?.sessions[getSessionKey(sessionPath)]?.checkpoints ?? [];
@@ -625,6 +694,32 @@ function getStoredPromptIndex(value: Record<string, unknown>, version: unknown):
 		return undefined;
 	}
 	return version === legacyReversionVersion ? Math.max(0, value.promptIndex - 1) : value.promptIndex;
+}
+
+async function inferPromptIndexFromSession(sessionPath: string | undefined, promptText: string): Promise<number | undefined> {
+	if (!sessionPath) {
+		return undefined;
+	}
+	const promptTexts = await readSessionUserPromptTexts(sessionPath);
+	const matchingIndexes = promptTexts
+		.map((text, promptIndex) => text === promptText ? promptIndex : -1)
+		.filter((promptIndex) => promptIndex >= 0);
+	return matchingIndexes.length === 1 ? matchingIndexes[0] : undefined;
+}
+
+async function readSessionUserPromptTexts(sessionPath: string): Promise<string[]> {
+	try {
+		const text = await readFile(sessionPath, 'utf8');
+		return text
+			.split(/\r?\n/)
+			.map((line) => parseJsonObject(line))
+			.filter((entry): entry is Record<string, unknown> => entry !== undefined)
+			.map((entry) => entry.message)
+			.filter((message) => getMessageRole(message) === 'user')
+			.map((message) => getMessageText(message));
+	} catch {
+		return [];
+	}
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
