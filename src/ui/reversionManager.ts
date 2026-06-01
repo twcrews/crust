@@ -378,7 +378,7 @@ export class ReversionManager {
 		if (!targetCheckpoint) {
 			throw new Error(`Reversion checkpoint not found: ${plan.checkpointId}`);
 		}
-		const summaries = await this.listSessionCheckpoints(targetCheckpoint.sessionPath, targetCheckpoint.workspaceRoot);
+		const summaries = await this.getResetCandidateSummaries(targetCheckpoint);
 		const promptIndex = Math.max(-1, ...summaries.map((summary) => summary.promptIndex)) + 1;
 		const checkpoint = await this.createCheckpoint({
 			sessionPath: targetCheckpoint.sessionPath,
@@ -428,6 +428,9 @@ export class ReversionManager {
 		const sortedSummaries = [...session.checkpoints].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 		const reconciledIndexes = new Map<string, number>();
 		for (const summary of sortedSummaries) {
+			if (isSafetyCheckpointSummary(summary)) {
+				continue;
+			}
 			const indexes = nextIndexesByPromptText.get(summary.promptText);
 			const promptIndex = indexes?.shift();
 			if (promptIndex === undefined || promptIndex === summary.promptIndex) {
@@ -437,6 +440,16 @@ export class ReversionManager {
 			reconciledIndexes.set(summary.id, promptIndex);
 			changed = true;
 		}
+		const safetySummaries = sortedSummaries.filter(isSafetyCheckpointSummary).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+		safetySummaries.forEach((summary, safetyIndex) => {
+			const promptIndex = promptTexts.length + safetyIndex;
+			if (summary.promptIndex === promptIndex) {
+				return;
+			}
+			summary.promptIndex = promptIndex;
+			reconciledIndexes.set(summary.id, promptIndex);
+			changed = true;
+		});
 		if (!changed) {
 			return;
 		}
@@ -589,6 +602,10 @@ function toSummary(checkpoint: ReversionCheckpoint): ReversionCheckpointSummary 
 		mutationCount: checkpoint.mutationCount,
 		unsafeMutationCount: checkpoint.unsafeMutationCount,
 	};
+}
+
+function isSafetyCheckpointSummary(checkpoint: ReversionCheckpointSummary): boolean {
+	return checkpoint.promptText.startsWith('Before reset to prompt ') && checkpoint.promptMessageId.startsWith('prompt-');
 }
 
 function createCheckpointId(prefix = 'checkpoint'): string {

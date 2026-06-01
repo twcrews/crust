@@ -709,19 +709,22 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 	private async restoreMessages(messages: unknown[], sessionName?: string): Promise<void> {
 		const checkpoints = await this.reversionManager.listCheckpoints(this.activeSessionPath);
-		const checkpointByPromptIndex = new Map(checkpoints.map((checkpoint) => [checkpoint.promptIndex, checkpoint.id]));
-		const checkpointsByPromptText = new Map<string, string[]>();
+		const checkpointsByPromptIndex = new Map<number, typeof checkpoints>();
+		const checkpointsByPromptText = new Map<string, typeof checkpoints>();
 		for (const checkpoint of checkpoints) {
-			const entries = checkpointsByPromptText.get(checkpoint.promptText) ?? [];
-			entries.push(checkpoint.id);
-			checkpointsByPromptText.set(checkpoint.promptText, entries);
+			const indexEntries = checkpointsByPromptIndex.get(checkpoint.promptIndex) ?? [];
+			indexEntries.push(checkpoint);
+			checkpointsByPromptIndex.set(checkpoint.promptIndex, indexEntries);
+			const textEntries = checkpointsByPromptText.get(checkpoint.promptText) ?? [];
+			textEntries.push(checkpoint);
+			checkpointsByPromptText.set(checkpoint.promptText, textEntries);
 		}
 		const restored = restoreSessionMessages(messages, sessionName, (message) => this.post(message), (text) => this.getSlashCommandLabel(text), (promptIndex, promptText) => {
-			const checkpointId = checkpointByPromptIndex.get(promptIndex);
-			if (checkpointId) {
-				return checkpointId;
+			const checkpoint = checkpointsByPromptIndex.get(promptIndex)?.find((candidate) => candidate.promptText === promptText);
+			if (checkpoint) {
+				return checkpoint.id;
 			}
-			return checkpointsByPromptText.get(promptText)?.shift();
+			return checkpointsByPromptText.get(promptText)?.shift()?.id;
 		});
 		this.conversationState.hasSessionTitle = restored.hasSessionTitle;
 		this.post({ type: 'sessionTitle', title: restored.title });
@@ -1309,8 +1312,8 @@ export class CrustChatPanel implements vscode.Disposable {
 			}
 			const detail = [
 				`Affected files: ${plan.stats.affectedFileCount}`,
-				`Lines added: ${plan.stats.addedLineCount}`,
-				`Lines removed: ${plan.stats.removedLineCount}`,
+				`Lines to be added: ${plan.stats.addedLineCount}`,
+				`Lines to be removed: ${plan.stats.removedLineCount}`,
 				plan.unsafeMutationCount ? `Warning: ${plan.unsafeMutationCount} shell command${plan.unsafeMutationCount === 1 ? '' : 's'} ran after this point. Some changes may not be tracked.` : undefined,
 			].filter((line): line is string => Boolean(line)).join('\n');
 			const confirmed = await this.showResetDialog({ title: 'Reset code to this point?', detail, confirmLabel: 'Reset Code', cancelLabel: 'Cancel', severity: 'warning' });
@@ -1517,7 +1520,6 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private post(message: unknown): void {
-		this.log('Posting webview message', getPostLogDetails(message));
 		void this.panel.webview.postMessage(message);
 	}
 

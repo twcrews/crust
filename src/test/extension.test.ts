@@ -647,6 +647,23 @@ suite('Reversion manager', () => {
 		assert.strictEqual((await manager.getCheckpoint('checkpoint-legacy'))?.promptIndex, 1);
 	});
 
+	test('keeps reset safety checkpoints out of restored prompt indexes', async () => {
+		const sessionPath = join(directory, 'session.jsonl');
+		await writeFile(sessionPath, [
+			JSON.stringify({ type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'First prompt' }] } }),
+			JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'Done' }] } }),
+			JSON.stringify({ type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'Second prompt' }] } }),
+		].join('\n'), 'utf8');
+		await manager.createCheckpoint({ sessionPath, promptMessageId: 'user-1', promptText: 'First prompt', promptIndex: 0 });
+		await manager.createCheckpoint({ sessionPath, promptMessageId: 'user-2', promptText: 'Second prompt', promptIndex: 1 });
+		const safety = await manager.createCheckpoint({ sessionPath, promptText: 'Before reset to prompt 2', promptIndex: 0 });
+
+		const checkpoints = await manager.listCheckpoints(sessionPath);
+		const safetySummary = checkpoints.find((checkpoint) => checkpoint.id === safety.id);
+		assert.strictEqual(safetySummary?.promptIndex, 2);
+		assert.strictEqual((await manager.getCheckpoint(safety.id))?.promptIndex, 2);
+	});
+
 	test('repairs bad version-two prompt indexes from session prompt text', async () => {
 		const sessionPath = join(directory, 'session.jsonl');
 		await writeFile(sessionPath, [
