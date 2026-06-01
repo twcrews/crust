@@ -56,7 +56,7 @@ body {
 	flex: 0 0 auto;
 	width: 10px;
 	height: 10px;
-	margin-top: 7px;
+	margin-top: 5px;
 	border-radius: 999px;
 	background: var(--vscode-notificationsInfoIcon-foreground, var(--vscode-foreground));
 }
