@@ -43,10 +43,21 @@ function getMessageScrollTop(element) {
 
 function updateEmptyState() {
 	emptyState.classList.toggle("hidden", messagesContent.childElementCount > 0);
+	emptyState.classList.toggle("loading-session", sessionLoading && messagesContent.childElementCount === 0);
+}
+
+function setSessionLoading(loading) {
+	sessionLoading = Boolean(loading);
+	if (sessionLoading) {
+		emptyStateText.textContent = "Loading previous session…";
+	} else if (emptyState.classList.contains("loading-session")) {
+		setRandomEmptyStateFlavorText();
+	}
+	updateEmptyState();
 }
 
 function setRandomEmptyStateFlavorText() {
-	if (!emptyStateText || emptyStateFlavorTexts.length === 0) {
+	if (sessionLoading || !emptyStateText || emptyStateFlavorTexts.length === 0) {
 		return;
 	}
 	emptyStateText.textContent = emptyStateFlavorTexts[Math.floor(Math.random() * emptyStateFlavorTexts.length)];

@@ -28,9 +28,10 @@
 			</div>
 		</header>
 		<main id="messages" class="messages" aria-live="polite">
-			<div id="empty-state" class="empty-state">
+			<div id="empty-state" class="empty-state{{initialLoadingClass}}">
+				<div class="empty-state-spinner" aria-hidden="true"></div>
 				<img class="empty-state-icon" src="{{iconUri}}" alt="" aria-hidden="true">
-				<p id="empty-state-text" class="empty-state-text">Ask Pi to inspect your workspace, explain code, or make a focused change.</p>
+				<p id="empty-state-text" class="empty-state-text">{{emptyStateText}}</p>
 			</div>
 			<div id="messages-content" class="messages-content"></div>
 		</main>

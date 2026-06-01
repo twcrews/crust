@@ -280,7 +280,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.reversionManager = new ReversionManager(this.context, this.cwd);
 		this.log('Creating chat panel', { cwd: this.cwd });
 		this.panel.iconPath = this.getIconPath();
-		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview, { allowRawHtml: this.allowRawHtml, includeIdeContextByDefault: this.includeIdeContextByDefault });
+		this.panel.webview.html = getChatWebviewHtml(this.context.extensionUri, this.panel.webview, { allowRawHtml: this.allowRawHtml, includeIdeContextByDefault: this.includeIdeContextByDefault, initialSessionLoading: Boolean(this.restoredSessionPath) });
 
 		CrustChatPanel.openPanels.add(this);
 		CrustChatPanel.lastFocusedPanel = this;
@@ -380,8 +380,10 @@ export class CrustChatPanel implements vscode.Disposable {
 			} else {
 				await this.postSessionStatus(messages);
 			}
+			this.postSessionLoading(false);
 			this.log('Initialized chat panel', { modelCount: models.length, messageCount: messages.length, commandCount: commands.length, contextWindow: this.contextWindow });
 		} catch (error) {
+			this.postSessionLoading(false);
 			const message = errorMessage(error);
 			this.log('Failed to initialize chat panel', { error: message }, 'error');
 			this.postError(`Unable to start Pi RPC: ${message}`);
@@ -691,23 +693,28 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private async restoreSession(session: SessionInfo): Promise<void> {
 		this.log('Restoring session', { path: session.path });
-		const switched = await this.client.switchSession(session.path);
-		if (!switched) {
-			return;
+		this.postSessionLoading(true);
+		try {
+			const switched = await this.client.switchSession(session.path);
+			if (!switched) {
+				return;
+			}
+
+			this.resetConversationState();
+			this.post({ type: 'clearMessages' });
+			this.postResetRestoreState(undefined);
+			this.post({ type: 'sessionPath', sessionPath: session.path });
+			this.watchSessionFile(session.path);
+
+			const messages = await this.client.getMessages();
+			this.submittedPromptCount = messages.filter((message) => getMessageRole(message) === 'user').length;
+			this.log('Fetched session messages', { count: messages.length });
+			await this.restoreMessages(messages, session.name);
+			await this.postCurrentSessionPath();
+			void this.refreshSlashCommands();
+		} finally {
+			this.postSessionLoading(false);
 		}
-
-		this.resetConversationState();
-		this.post({ type: 'clearMessages' });
-		this.postResetRestoreState(undefined);
-		this.post({ type: 'sessionPath', sessionPath: session.path });
-		this.watchSessionFile(session.path);
-
-		const messages = await this.client.getMessages();
-		this.submittedPromptCount = messages.filter((message) => getMessageRole(message) === 'user').length;
-		this.log('Fetched session messages', { count: messages.length });
-		await this.restoreMessages(messages, session.name);
-		await this.postCurrentSessionPath();
-		void this.refreshSlashCommands();
 	}
 	private async restoreMessages(messages: unknown[], sessionName?: string): Promise<void> {
 		const checkpoints = await this.reversionManager.listCheckpoints(this.activeSessionPath);
@@ -1527,6 +1534,10 @@ export class CrustChatPanel implements vscode.Disposable {
 
 	private postChatSettings(): void {
 		this.post({ type: 'chatSettings', includeIdeContextByDefault: this.includeIdeContextByDefault });
+	}
+
+	private postSessionLoading(loading: boolean): void {
+		this.post({ type: 'sessionLoading', loading });
 	}
 
 	private post(message: unknown): void {

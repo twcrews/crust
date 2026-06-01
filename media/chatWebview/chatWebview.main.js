@@ -349,6 +349,8 @@ function parseExtensionMessage(value) {
 			return { type: value.type, message: stringValue(value.message) };
 		case "processing":
 			return { type: "processing", processing: value.processing === true };
+		case "sessionLoading":
+			return { type: "sessionLoading", loading: value.loading === true };
 		case "sessionTitle":
 			return { type: "sessionTitle", title: stringValue(value.title, "New Chat") };
 		case "sessionPath":
@@ -416,6 +418,9 @@ window.addEventListener("message", (event) => {
 			break;
 		case "processing":
 			setProcessing(message.processing);
+			break;
+		case "sessionLoading":
+			setSessionLoading(message.loading);
 			break;
 		case "sessionTitle":
 			setSessionTitle(message.title);

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { getNonce } from '../utils/nonce';
 
-export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Webview, options: { allowRawHtml: boolean; includeIdeContextByDefault: boolean } = { allowRawHtml: false, includeIdeContextByDefault: false }): string {
+export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Webview, options: { allowRawHtml: boolean; includeIdeContextByDefault: boolean; initialSessionLoading?: boolean } = { allowRawHtml: false, includeIdeContextByDefault: false }): string {
 	const nonce = getNonce();
 	const htmlPath = join(extensionUri.fsPath, 'media', 'chatWebview.html');
 	const styleFiles = [
@@ -31,7 +31,7 @@ export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Web
 		'chatWebview.navigation.js',
 		'chatWebview.main.js',
 	];
-	const initialSettingsScript = `<script nonce="${nonce}">window.crustInitialSettings = ${JSON.stringify({ allowRawHtml: options.allowRawHtml, includeIdeContextByDefault: options.includeIdeContextByDefault })};</script>`;
+	const initialSettingsScript = `<script nonce="${nonce}">window.crustInitialSettings = ${JSON.stringify({ allowRawHtml: options.allowRawHtml, includeIdeContextByDefault: options.includeIdeContextByDefault, initialSessionLoading: options.initialSessionLoading === true })};</script>`;
 	const scriptTags = initialSettingsScript + '\n\t' + scriptFiles
 		.map((file) => {
 			const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'chatWebview', file));
@@ -45,5 +45,7 @@ export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Web
 		.replace(/{{styleTags}}/g, styleTags)
 		.replace(/{{scriptTags}}/g, scriptTags)
 		.replace(/{{iconUri}}/g, String(iconUri))
+		.replace(/{{initialLoadingClass}}/g, options.initialSessionLoading === true ? ' loading-session' : '')
+		.replace(/{{emptyStateText}}/g, options.initialSessionLoading === true ? 'Loading previous session…' : 'Ask Pi to inspect your workspace, explain code, or make a focused change.')
 		.replace(/{{cspSource}}/g, webview.cspSource);
 }

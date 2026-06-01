@@ -30,6 +30,25 @@
 	margin-bottom: 16px;
 	opacity: 0.9;
 }
+.empty-state.loading-session .empty-state-icon {
+	display: none;
+}
+.empty-state-spinner {
+	display: none;
+	width: 28px;
+	height: 28px;
+	margin-bottom: 16px;
+	border: 2px solid color-mix(in srgb, var(--vscode-descriptionForeground) 30%, transparent);
+	border-top-color: var(--vscode-progressBar-background, var(--vscode-focusBorder));
+	border-radius: 50%;
+	animation: crust-empty-state-spin 0.9s linear infinite;
+}
+.empty-state.loading-session .empty-state-spinner {
+	display: block;
+}
+@keyframes crust-empty-state-spin {
+	to { transform: rotate(360deg); }
+}
 .empty-state-text {
 	margin: 0;
 	color: var(--vscode-descriptionForeground);

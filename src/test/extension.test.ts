@@ -1355,14 +1355,23 @@ suite('Webview HTML and nonce generation', () => {
 		const html = getChatWebviewHtml(extensionUri, webview);
 		assert.ok(html.includes('vscode-resource:'));
 		assert.ok(html.includes('chatWebview.base.css'));
-		assert.ok(html.includes('window.crustInitialSettings = {"allowRawHtml":false,"includeIdeContextByDefault":false}'));
+		assert.ok(html.includes('window.crustInitialSettings = {"allowRawHtml":false,"includeIdeContextByDefault":false,"initialSessionLoading":false}'));
 		assert.ok(html.includes('generated/markdown-it.bundle.js'));
 		assert.ok(html.indexOf('generated/markdown-it.bundle.js') < html.indexOf('chatWebview.rendering.js'));
 		assert.ok(html.includes('chatWebview.main.js'));
 		assert.ok(html.includes('branding/icon.svg'));
+		assert.ok(html.includes('Ask Pi to inspect your workspace'));
+		assert.ok(!html.includes('loading-session'));
 		assert.ok(!html.includes('{{nonce}}'));
 		assert.ok(!html.includes('{{styleTags}}'));
 		assert.ok(!html.includes('{{scriptTags}}'));
+		assert.ok(!html.includes('{{initialLoadingClass}}'));
+		assert.ok(!html.includes('{{emptyStateText}}'));
+
+		const loadingHtml = getChatWebviewHtml(extensionUri, webview, { allowRawHtml: false, includeIdeContextByDefault: false, initialSessionLoading: true });
+		assert.ok(loadingHtml.includes('window.crustInitialSettings = {"allowRawHtml":false,"includeIdeContextByDefault":false,"initialSessionLoading":true}'));
+		assert.ok(loadingHtml.includes('empty-state loading-session'));
+		assert.ok(loadingHtml.includes('Loading previous session…'));
 	});
 
 	test('generates 32-character alphanumeric nonces and stringifies unknown errors', () => {

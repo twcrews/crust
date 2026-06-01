@@ -38,6 +38,7 @@ let ideContextEnabled = includeIdeContextByDefault;
 let currentIdeContextLabel = "";
 let currentTurn = null;
 let piProcessing = false;
+let sessionLoading = window.crustInitialSettings?.initialSessionLoading === true;
 let followChatEnabled = true;
 let programmaticScrollToBottom = false;
 let programmaticScrollToken = 0;
