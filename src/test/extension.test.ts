@@ -1193,6 +1193,7 @@ suite('Webview HTML and nonce generation', () => {
 		const html = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview.html'), 'utf8');
 		const source = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
 		const renderingSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.rendering.js'), 'utf8');
+		const navigationSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.navigation.js'), 'utf8');
 
 		assert.match(html, /<button id="submit" type="submit"/);
 		assert.match(html, /<svg class="stop-icon"/);
@@ -1202,6 +1203,8 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(source, /function hasCopyableSelection\(\) \{[\s\S]*prompt\.selectionStart !== prompt\.selectionEnd[\s\S]*window\.getSelection\(\);[\s\S]*!selection\.isCollapsed/);
 		assert.match(source, /case "processing":\s*setProcessing\(message\.processing\);\s*break;/);
 		assert.match(renderingSource, /secondary \? " secondary" : ""/);
+		assert.match(navigationSource, /const targetParent = currentTurn \?\? loading\.parentElement;[\s\S]*loading\.parentElement !== targetParent/);
+		assert.match(renderingSource, /appendConversationElement\(element, role === "user"\);[\s\S]*keepLoadingAtBottom\(\);/);
 	});
 
 	test('supports terminal-style prompt history recall at textarea edges', async () => {

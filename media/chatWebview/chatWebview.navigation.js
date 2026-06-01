@@ -119,9 +119,12 @@ function handleManualScrollUp() {
 
 function keepLoadingAtBottom() {
 	const loading = messagesContent.querySelector(".message.loading");
-	const parent = loading?.parentElement;
-	if (loading && parent && loading !== parent.lastElementChild) {
-		parent.append(loading);
+	if (!loading) {
+		return;
+	}
+	const targetParent = currentTurn ?? loading.parentElement;
+	if (targetParent && (loading.parentElement !== targetParent || loading !== targetParent.lastElementChild)) {
+		targetParent.append(loading);
 	}
 }
 
