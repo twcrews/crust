@@ -110,6 +110,7 @@ export type ResetConflict = {
 export type ResetPlan = {
 	checkpointId: string;
 	affectedFiles: ResetFileChange[];
+	inspectedFiles: ResetFileChange[];
 	stats: ResetStats;
 	conflicts: ResetConflict[];
 	unsafeMutationCount: number;
@@ -309,6 +310,7 @@ export class ReversionManager {
 		}
 
 		const affectedFiles: ResetFileChange[] = [];
+		const inspectedFiles: ResetFileChange[] = [];
 		const conflicts: ResetConflict[] = [];
 		let addedLineCount = 0;
 		let removedLineCount = 0;
@@ -321,6 +323,7 @@ export class ReversionManager {
 			try {
 				const current = await this.readFileSnapshot(change.absolutePath);
 				change.current = current;
+				inspectedFiles.push(change);
 				if (snapshotsEqual(current, change.target)) {
 					continue;
 				}
@@ -340,6 +343,7 @@ export class ReversionManager {
 		return {
 			checkpointId,
 			affectedFiles,
+			inspectedFiles,
 			stats: {
 				affectedFileCount: affectedFiles.length,
 				addedLineCount,

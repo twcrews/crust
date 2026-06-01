@@ -15,7 +15,7 @@ import { getMessageRole, getMessageText } from './messageUtils';
 import { createId, formatErrorForChat, formatSessionDate, getAbortMessage, getInitialCwd, getLastModelFromSessionText, getModelContextWindow, getPostLogDetails, getSessionPath, getWorkspaceStatus, hasMessageUsage, isAbortedAssistantMessage, modelKey, truncate } from './chatPanelUtils';
 import { createConversationState, resetStreamingState, type ConversationState } from './conversationState';
 import { getPathSuggestions } from './pathAutocomplete';
-import { ReversionManager } from './reversionManager';
+import { ReversionManager, type FileSnapshot, type ResetPlan } from './reversionManager';
 import { listSessions } from './sessionHistory';
 import { restoreSessionMessages } from './sessionRestoreRenderer';
 import { getBuiltinSlashCommands, getPiChangelogMarkdown, isSupportedBuiltinSlashCommand, orderSlashCommands } from './slashCommands';
@@ -35,6 +35,34 @@ function getPiCommandPathSetting(): string {
 
 function getIncludeIdeContextByDefaultSetting(): boolean {
 	return vscode.workspace.getConfiguration('crust.chat').get<boolean>('includeIdeContextByDefault', false);
+}
+
+function snapshotLogDetails(snapshot: FileSnapshot): Record<string, unknown> {
+	return {
+		exists: snapshot.exists,
+		hash: snapshot.hash,
+		lineCount: snapshot.lineCount,
+		contentLength: snapshot.content?.length,
+	};
+}
+
+function getResetPlanLogDetails(plan: ResetPlan): Record<string, unknown> {
+	return {
+		checkpointId: plan.checkpointId,
+		affectedFileCount: plan.affectedFiles.length,
+		stats: plan.stats,
+		conflictCount: plan.conflicts.length,
+		conflicts: plan.conflicts,
+		unsafeMutationCount: plan.unsafeMutationCount,
+		files: plan.inspectedFiles.map((change) => ({
+			path: change.path,
+			absolutePath: change.absolutePath,
+			affected: plan.affectedFiles.some((affected) => affected.absolutePath === change.absolutePath),
+			target: snapshotLogDetails(change.target),
+			expectedCurrent: change.expectedCurrent ? snapshotLogDetails(change.expectedCurrent) : undefined,
+			current: change.current ? snapshotLogDetails(change.current) : undefined,
+		})), 
+	};
 }
 
 function getLockEditorGroupOnOpenSetting(): boolean {
@@ -1238,6 +1266,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private async resetCodeToCheckpoint(checkpointId: string): Promise<void> {
+		this.log('Reset checkpoint requested', { checkpointId, activeSessionPath: this.activeSessionPath, cwd: this.cwd });
 		if (this.activeSessionPath) {
 			await this.reversionManager.updateCheckpointSessionPath(checkpointId, this.activeSessionPath);
 		}
@@ -1246,7 +1275,25 @@ export class CrustChatPanel implements vscode.Disposable {
 			return;
 		}
 		try {
+			const checkpoint = await this.reversionManager.getCheckpoint(checkpointId);
+			this.log('Reset checkpoint resolved', checkpoint ? {
+				checkpointId: checkpoint.id,
+				sessionPath: checkpoint.sessionPath,
+				workspaceRoot: checkpoint.workspaceRoot,
+				promptIndex: checkpoint.promptIndex,
+				promptText: truncate(checkpoint.promptText, 120),
+				mutationCount: checkpoint.mutationCount,
+				unsafeMutationCount: checkpoint.unsafeMutationCount,
+				mutations: checkpoint.mutations.map((mutation) => ({
+					path: mutation.path,
+					absolutePath: mutation.absolutePath,
+					toolName: mutation.toolName,
+					before: snapshotLogDetails(mutation.before),
+					after: mutation.after ? snapshotLogDetails(mutation.after) : undefined,
+				})),
+			} : { checkpointId, found: false }, checkpoint ? 'info' : 'warn');
 			const plan = await this.reversionManager.buildResetPlan(checkpointId);
+			this.log('Reset plan built', getResetPlanLogDetails(plan));
 			if (plan.conflicts.length) {
 				await this.showResetDialog({
 					title: 'Cannot reset code because some files changed outside of Crust.',
@@ -1273,6 +1320,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			const appliedPlan = await this.reversionManager.applyResetPlan(plan);
 			this.post({ type: 'status', message: `Reset ${appliedPlan.stats.affectedFileCount} file${appliedPlan.stats.affectedFileCount === 1 ? '' : 's'}.` });
 		} catch (error) {
+			this.log('Reset checkpoint failed', { checkpointId, error: errorMessage(error) }, 'error');
 			await this.showResetDialog({ title: `Unable to reset code: ${errorMessage(error)}`, confirmLabel: 'OK', severity: 'error' });
 		}
 	}
