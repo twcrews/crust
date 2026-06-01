@@ -23,6 +23,9 @@ const jumpTop = document.getElementById("jump-top");
 const jumpPreviousUser = document.getElementById("jump-previous-user");
 const jumpNextUser = document.getElementById("jump-next-user");
 const followChat = document.getElementById("follow-chat");
+const resetRestoreBanner = document.getElementById("reset-restore-banner");
+const resetRestoreMessage = document.getElementById("reset-restore-message");
+const resetRestoreButton = document.getElementById("reset-restore-button");
 const modalBackdrop = document.getElementById("modal-backdrop");
 const modalTitle = document.getElementById("modal-title");
 const modalDetail = document.getElementById("modal-detail");
@@ -58,6 +61,7 @@ let fileReferenceValidationTimer = 0;
 let fileReferenceValidationRequestId = 0;
 let activeModalRequestId = 0;
 let previousModalFocus = null;
+let resetRestoreCheckpointId = "";
 
 const emptyStateFlavorTexts = [
 	"Fun fact: this extension was almost named 'Circumference'!",

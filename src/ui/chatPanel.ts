@@ -644,6 +644,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			}
 			this.resetConversationState();
 			this.post({ type: 'clearMessages' });
+			this.postResetRestoreState(undefined);
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
 			this.submittedPromptCount = 0;
 			await this.postCurrentSessionPath();
@@ -697,6 +698,7 @@ export class CrustChatPanel implements vscode.Disposable {
 
 		this.resetConversationState();
 		this.post({ type: 'clearMessages' });
+		this.postResetRestoreState(undefined);
 		this.post({ type: 'sessionPath', sessionPath: session.path });
 		this.watchSessionFile(session.path);
 
@@ -1182,6 +1184,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private async submitPrompt(text: string, includeIdeContext: boolean, display?: { text?: string; slashCommandLabel?: string }): Promise<void> {
+		this.postResetRestoreState(undefined);
 		const trimmed = text.trim();
 		const displayText = display?.text ?? trimmed;
 		const ideContext = includeIdeContext ? getIdeContext(this.lastActiveTextEditor) : undefined;
@@ -1322,10 +1325,15 @@ export class CrustChatPanel implements vscode.Disposable {
 			}
 			const appliedPlan = await this.reversionManager.applyResetPlan(plan);
 			this.post({ type: 'status', message: `Reset ${appliedPlan.stats.affectedFileCount} file${appliedPlan.stats.affectedFileCount === 1 ? '' : 's'}.` });
+			this.postResetRestoreState(appliedPlan.safetyCheckpointId);
 		} catch (error) {
 			this.log('Reset checkpoint failed', { checkpointId, error: errorMessage(error) }, 'error');
 			await this.showResetDialog({ title: `Unable to reset code: ${errorMessage(error)}`, confirmLabel: 'OK', severity: 'error' });
 		}
+	}
+
+	private postResetRestoreState(checkpointId: string | undefined): void {
+		this.post({ type: 'resetRestoreState', checkpointId, message: checkpointId ? 'Code was reset to an earlier point.' : undefined });
 	}
 
 	private showResetDialog(options: { title: string; detail?: string; confirmLabel: string; cancelLabel?: string; severity: 'info' | 'warning' | 'error' }): Promise<boolean> {

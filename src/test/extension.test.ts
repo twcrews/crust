@@ -841,12 +841,14 @@ suite('Reversion manager', () => {
 
 		const applied = await manager.applyResetPlan(await manager.buildResetPlan(checkpoint.id));
 		assert.strictEqual(applied.stats.affectedFileCount, 1);
+		assert.ok(applied.safetyCheckpointId);
 		assert.strictEqual(await readFile(file, 'utf8'), 'before\n');
 
 		const checkpoints = await manager.listCheckpoints('/tmp/session.jsonl');
 		assert.strictEqual(checkpoints.length, 2);
 		assert.strictEqual(checkpoints[1]?.promptText, 'Before reset to prompt 1');
 		const safetyCheckpoint = await manager.getCheckpoint(checkpoints[1]!.id);
+		assert.strictEqual(safetyCheckpoint?.id, applied.safetyCheckpointId);
 		assert.strictEqual(safetyCheckpoint?.mutations[0]?.before.content, 'after\nextra\n');
 		assert.strictEqual(safetyCheckpoint?.mutations[0]?.after?.content, 'before\n');
 	});
@@ -1062,6 +1064,23 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(css, /\.user:hover \.reset-checkpoint-button,[\s\S]*\.reset-checkpoint-button:focus-visible \{[\s\S]*opacity: 1;/);
 		assert.match(css, /\.reset-checkpoint-button:hover \{[\s\S]*linear-gradient\(var\(--vscode-list-activeSelectionBackground[\s\S]*var\(--vscode-editorWidget-background[\s\S]*opacity: 1 !important;/);
 		assert.doesNotMatch(css, /\.user:focus-within \.reset-checkpoint-button/);
+	});
+
+	test('renders restore-before-reset banner for safety checkpoints', async () => {
+		const html = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview.html'), 'utf8');
+		const mainSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.main.js'), 'utf8');
+		const stateSource = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.state.js'), 'utf8');
+		const controlsCss = await readFile(resolve(__dirname, '..', '..', 'media', 'chatWebview', 'chatWebview.controls.css'), 'utf8');
+		const panelSource = await readFile(resolve(__dirname, '..', '..', 'src', 'ui', 'chatPanel.ts'), 'utf8');
+
+		assert.match(html, /id="reset-restore-banner"[\s\S]*Restore code from before reset/);
+		assert.match(stateSource, /const resetRestoreBanner = document\.getElementById\("reset-restore-banner"\);[\s\S]*let resetRestoreCheckpointId = "";/);
+		assert.match(mainSource, /function setResetRestoreState\(checkpointId, message\)[\s\S]*resetRestoreBanner\.classList\.toggle\("hidden", !resetRestoreCheckpointId\);/);
+		assert.match(mainSource, /resetRestoreButton\.addEventListener\("click"[\s\S]*vscode\.postMessage\(\{ type: "requestResetToCheckpoint", checkpointId: resetRestoreCheckpointId \}\);/);
+		assert.match(mainSource, /case "resetRestoreState":[\s\S]*setResetRestoreState\(message\.checkpointId, message\.message\);/);
+		assert.match(controlsCss, /\.reset-restore-banner \{[\s\S]*position: absolute;[\s\S]*background: var\(--vscode-editorWidget-background/);
+		assert.match(panelSource, /this\.post\(\{ type: 'resetRestoreState', checkpointId, message: checkpointId \? 'Code was reset to an earlier point\.' : undefined \}\);/);
+		assert.match(panelSource, /this\.postResetRestoreState\(appliedPlan\.safetyCheckpointId\);/);
 	});
 
 	test('renders reset confirmations as webview modals', async () => {

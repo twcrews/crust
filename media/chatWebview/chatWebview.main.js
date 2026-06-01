@@ -70,6 +70,19 @@ function requestCancelCurrentTask(source) {
 	vscode.postMessage({ type: "cancel" });
 }
 
+function setResetRestoreState(checkpointId, message) {
+	resetRestoreCheckpointId = checkpointId || "";
+	resetRestoreMessage.textContent = message || "Code was reset to an earlier point.";
+	resetRestoreBanner.classList.toggle("hidden", !resetRestoreCheckpointId);
+}
+
+resetRestoreButton.addEventListener("click", () => {
+	if (!resetRestoreCheckpointId) {
+		return;
+	}
+	vscode.postMessage({ type: "requestResetToCheckpoint", checkpointId: resetRestoreCheckpointId });
+});
+
 function showModal(message) {
 	activeModalRequestId = message.requestId;
 	previousModalFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -315,6 +328,8 @@ function parseExtensionMessage(value) {
 			return typeof value.requestId === "number" && typeof value.title === "string"
 				? { type: "resetDialog", requestId: value.requestId, title: value.title, detail: stringValue(value.detail), confirmLabel: stringValue(value.confirmLabel, "OK"), cancelLabel: stringValue(value.cancelLabel, undefined), severity: stringValue(value.severity, "info") }
 				: null;
+		case "resetRestoreState":
+			return { type: "resetRestoreState", checkpointId: stringValue(value.checkpointId), message: stringValue(value.message) };
 		case "pathAutocomplete":
 			return typeof value.requestId === "number" ? { type: "pathAutocomplete", requestId: value.requestId, suggestions: arrayValue(value.suggestions) } : null;
 		case "projectFiles":
@@ -370,6 +385,9 @@ window.addEventListener("message", (event) => {
 		case "resetDialog":
 			showModal(message);
 			break;
+		case "resetRestoreState":
+			setResetRestoreState(message.checkpointId, message.message);
+			break;
 		case "focusModel":
 			model.focus();
 			break;
@@ -406,6 +424,7 @@ window.addEventListener("message", (event) => {
 		case "clearMessages":
 			messagesContent.textContent = "";
 			currentTurn = null;
+			setResetRestoreState("", "");
 			setRandomEmptyStateFlavorText();
 			updateEmptyState();
 			break;

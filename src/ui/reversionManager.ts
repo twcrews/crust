@@ -114,6 +114,7 @@ export type ResetPlan = {
 	stats: ResetStats;
 	conflicts: ResetConflict[];
 	unsafeMutationCount: number;
+	safetyCheckpointId?: string;
 };
 
 type ReversionStorageContext = {
@@ -275,7 +276,7 @@ export class ReversionManager {
 			}
 			await this.recordFileMutationEnd(safetyCheckpoint.id, { toolCallId: `reset:${change.absolutePath}`, toolName: 'edit', filePath: change.absolutePath, workspaceRoot: safetyCheckpoint.workspaceRoot });
 		}
-		return freshPlan;
+		return { ...freshPlan, safetyCheckpointId: safetyCheckpoint.id };
 	}
 
 	async buildResetPlan(checkpointId: string): Promise<ResetPlan> {
