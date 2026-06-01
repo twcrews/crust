@@ -1006,7 +1006,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(css, /\.reset-checkpoint-button \{[\s\S]*position: absolute;[\s\S]*right: -9px;[\s\S]*bottom: -9px;/);
 		assert.match(css, /\.reset-checkpoint-button \{[\s\S]*background: var\(--vscode-editorWidget-background/);
 		assert.match(css, /\.user:hover \.reset-checkpoint-button,[\s\S]*\.reset-checkpoint-button:focus-visible \{[\s\S]*opacity: 1;/);
-		assert.match(css, /\.reset-checkpoint-button:hover \{[\s\S]*background: var\(--vscode-list-activeSelectionBackground/);
+		assert.match(css, /\.reset-checkpoint-button:hover \{[\s\S]*background: var\(--vscode-list-activeSelectionBackground[\s\S]*opacity: 1;/);
 		assert.doesNotMatch(css, /\.user:focus-within \.reset-checkpoint-button/);
 	});
 
