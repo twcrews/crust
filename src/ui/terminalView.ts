@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import * as vscode from 'vscode';
 import { getIdeContext } from './ideContext';
@@ -32,6 +32,8 @@ export function getUseTerminalViewByDefaultSetting(): boolean {
 }
 
 const terminalSessionsKey = 'crust.terminalSessions';
+const terminalIntegrationFingerprintKey = 'crust.terminalIntegrationFingerprint';
+const terminalIntegrationSchemaVersion = 1;
 
 type TerminalSessionMap = Record<string, string>;
 
@@ -55,6 +57,7 @@ export class CrustTerminalView {
 		void this.writeIdeContext();
 
 		void this.ensureBridge(context);
+		void this.promptForTerminalIntegrationRestartIfNeeded(context);
 		if (getUseTerminalViewByDefaultSetting() && getRestoreOnReloadSetting()) {
 			void this.restore(context);
 		}
@@ -196,7 +199,7 @@ export class CrustTerminalView {
 	}
 
 	static hasOpenTerminal(): boolean {
-		return this.terminalsById.size > 0;
+		return this.terminalsById.size > 0 || vscode.window.terminals.some((terminal) => terminal.name === 'Crust');
 	}
 
 	static async replaceSession(context: vscode.ExtensionContext, sessionFile: string): Promise<void> {
@@ -213,6 +216,54 @@ export class CrustTerminalView {
 		await this.show(context, sessionFile);
 		previousTerminal?.dispose();
 		await this.removeSession(context, terminalId);
+	}
+
+	private static async promptForTerminalIntegrationRestartIfNeeded(context: vscode.ExtensionContext): Promise<void> {
+		const currentFingerprint = await this.getTerminalIntegrationFingerprint(context);
+		const previousFingerprint = context.globalState.get<string>(terminalIntegrationFingerprintKey);
+		await context.globalState.update(terminalIntegrationFingerprintKey, currentFingerprint);
+		if (!previousFingerprint || previousFingerprint === currentFingerprint) {
+			return;
+		}
+		const crustTerminals = vscode.window.terminals.filter((terminal) => terminal.name === 'Crust');
+		if (!crustTerminals.length) {
+			return;
+		}
+		const restart = 'Restart Terminals';
+		const selected = await vscode.window.showInformationMessage(
+			'Crust’s terminal integration was updated. Restart open Crust terminals to apply the update? Active responses or unsent input may be lost.',
+			restart,
+			'Later',
+		);
+		if (selected === restart) {
+			await this.restartOpenTerminals(context);
+		}
+	}
+
+	private static async getTerminalIntegrationFingerprint(context: vscode.ExtensionContext): Promise<string> {
+		const injectedExtensionPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'pi', 'crust-vscode-context.js').fsPath;
+		const injectedExtension = await readFile(injectedExtensionPath, 'utf8');
+		return createHash('sha256').update(JSON.stringify({
+			extensionVersion: context.extension.packageJSON.version,
+			schemaVersion: terminalIntegrationSchemaVersion,
+			injectedExtensionHash: createHash('sha256').update(injectedExtension).digest('hex'),
+		})).digest('hex');
+	}
+
+	private static async restartOpenTerminals(context: vscode.ExtensionContext): Promise<void> {
+		const sessions = context.workspaceState.get<TerminalSessionMap>(terminalSessionsKey, {});
+		const sessionFiles = [...new Set(Object.values(sessions).filter((sessionFile) => sessionFile && existsSync(sessionFile)))];
+		for (const terminal of vscode.window.terminals.filter((candidate) => candidate.name === 'Crust')) {
+			terminal.dispose();
+		}
+		this.terminalIds = new WeakMap<vscode.Terminal, string>();
+		this.terminalsById.clear();
+		this.sessionFilesByTerminalId.clear();
+		this.lastFocusedTerminalId = undefined;
+		await context.workspaceState.update(terminalSessionsKey, {});
+		for (const sessionFile of sessionFiles) {
+			await this.show(context, sessionFile);
+		}
 	}
 
 	private static async updateSession(context: vscode.ExtensionContext, terminalId: string, sessionFile: string): Promise<void> {

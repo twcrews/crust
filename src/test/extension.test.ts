@@ -1253,7 +1253,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(extensionSource, /crust\.openChatDefault[\s\S]*getUseTerminalViewByDefaultSetting\(\) \? CrustTerminalView\.show\(context\) : CrustChatPanel\.show\(context\)/);
 		assert.match(extensionSource, /CrustChatPanel\.registerSerializer\(context\)/);
 		assert.match(panelSource, /registerWebviewPanelSerializer\(CrustChatPanel\.viewType/);
-		assert.match(panelSource, /deserializeWebviewPanel: async \(panel, state(?:: unknown)?\) => \{[\s\S]*const shouldRestoreSession = getRestoreOnReloadSetting\(\);[\s\S]*new CrustChatPanel\(context, panel, sessionPath\);/);
+		assert.match(panelSource, /deserializeWebviewPanel: async \(panel, state(?:: unknown)?\) => \{[\s\S]*panel\.webview\.options = \{ enableScripts: true \};[\s\S]*const shouldRestoreSession = getRestoreOnReloadSetting\(\);[\s\S]*new CrustChatPanel\(context, panel, sessionPath\);/);
 		assert.match(panelSource, /switchSession\(this\.restoredSessionPath\)/);
 		assert.match(panelSource, /const sessionPath = getSessionPath\(state\);[\s\S]*this\.post\(\{ type: 'sessionPath', sessionPath \}\);/);
 		assert.match(mainSource, /case "sessionPath":\s*updatePersistedWebviewState\(\{ sessionPath: message\.sessionPath \|\| undefined \}\);\s*break;/);
@@ -1272,6 +1272,15 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(terminalSource, /CRUST_BRIDGE_URL/);
 		assert.match(terminalSource, /'--extension',[\s\S]*crust-vscode-context\.js/);
 		assert.match(terminalSource, /static async restore\(context: vscode\.ExtensionContext\)/);
+		assert.match(terminalSource, /promptForTerminalIntegrationRestartIfNeeded\(context\)/);
+		assert.match(terminalSource, /terminalIntegrationFingerprintKey = 'crust\.terminalIntegrationFingerprint'/);
+		assert.match(terminalSource, /createHash\('sha256'\)/);
+		assert.match(terminalSource, /crust-vscode-context\.js'\)\.fsPath/);
+		assert.match(terminalSource, /const restart = 'Restart Terminals'/);
+		assert.match(terminalSource, /showInformationMessage\([\s\S]*terminal integration was updated[\s\S]*restart/);
+		assert.match(terminalSource, /private static async restartOpenTerminals\(context: vscode\.ExtensionContext\)/);
+		assert.match(terminalSource, /terminal\.dispose\(\)/);
+		assert.match(terminalSource, /await this\.show\(context, sessionFile\)/);
 		assert.match(terminalSource, /workspaceState\.get<TerminalSessionMap>\(terminalSessionsKey/);
 		assert.match(contextExtensionSource, /CRUST_IDE_CONTEXT_ENABLED/);
 		assert.match(contextExtensionSource, /CRUST_BRIDGE_URL/);
@@ -1354,11 +1363,11 @@ suite('Webview HTML and nonce generation', () => {
 
 		const html = getChatWebviewHtml(extensionUri, webview);
 		assert.ok(html.includes('vscode-resource:'));
-		assert.ok(html.includes('chatWebview.base.css'));
+		assert.match(html, /chatWebview\.base\.css\?v=[^\"]+/);
 		assert.ok(html.includes('window.crustInitialSettings = {"allowRawHtml":false,"includeIdeContextByDefault":false,"initialSessionLoading":false}'));
-		assert.ok(html.includes('generated/markdown-it.bundle.js'));
+		assert.match(html, /generated\/markdown-it\.bundle\.js\?v=[^\"]+/);
 		assert.ok(html.indexOf('generated/markdown-it.bundle.js') < html.indexOf('chatWebview.rendering.js'));
-		assert.ok(html.includes('chatWebview.main.js'));
+		assert.match(html, /chatWebview\.main\.js\?v=[^\"]+/);
 		assert.ok(html.includes('branding/icon.svg'));
 		assert.ok(html.includes('Ask Pi to inspect your workspace'));
 		assert.ok(!html.includes('loading-session'));

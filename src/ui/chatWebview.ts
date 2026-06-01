@@ -5,6 +5,7 @@ import { getNonce } from '../utils/nonce';
 
 export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Webview, options: { allowRawHtml: boolean; includeIdeContextByDefault: boolean; initialSessionLoading?: boolean } = { allowRawHtml: false, includeIdeContextByDefault: false }): string {
 	const nonce = getNonce();
+	const cacheToken = encodeURIComponent(String(vscode.extensions.getExtension('crews.crust')?.packageJSON.version ?? Date.now()));
 	const htmlPath = join(extensionUri.fsPath, 'media', 'chatWebview.html');
 	const styleFiles = [
 		'chatWebview.base.css',
@@ -19,7 +20,7 @@ export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Web
 	const styleTags = styleFiles
 		.map((file) => {
 			const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'chatWebview', file));
-			return `<link rel="stylesheet" href="${styleUri}">`;
+			return `<link rel="stylesheet" href="${styleUri}?v=${cacheToken}">`;
 		})
 		.join('\n\t');
 	const scriptFiles = [
@@ -35,7 +36,7 @@ export function getChatWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Web
 	const scriptTags = initialSettingsScript + '\n\t' + scriptFiles
 		.map((file) => {
 			const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'chatWebview', file));
-			return `<script nonce="${nonce}" src="${scriptUri}"></script>`;
+			return `<script nonce="${nonce}" src="${scriptUri}?v=${cacheToken}"></script>`;
 		})
 		.join('\n\t');
 	const iconUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'branding', 'icon.svg'));
