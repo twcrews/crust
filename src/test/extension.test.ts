@@ -1078,7 +1078,10 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(mainSource, /function setResetRestoreState\(checkpointId, message\)[\s\S]*resetRestoreBanner\.classList\.toggle\("hidden", !resetRestoreCheckpointId\);/);
 		assert.match(mainSource, /resetRestoreButton\.addEventListener\("click"[\s\S]*vscode\.postMessage\(\{ type: "requestResetToCheckpoint", checkpointId: resetRestoreCheckpointId \}\);/);
 		assert.match(mainSource, /case "resetRestoreState":[\s\S]*setResetRestoreState\(message\.checkpointId, message\.message\);/);
-		assert.match(controlsCss, /\.reset-restore-banner \{[\s\S]*position: absolute;[\s\S]*background: var\(--vscode-editorWidget-background/);
+		const bannerCss = controlsCss.match(/\.reset-restore-banner \{[\s\S]*?\n\}/)?.[0] ?? '';
+		assert.match(bannerCss, /background: var\(--vscode-editorWidget-background/);
+		assert.match(bannerCss, /pointer-events: auto;/);
+		assert.doesNotMatch(bannerCss, /position: absolute;/);
 		assert.match(panelSource, /this\.post\(\{ type: 'resetRestoreState', checkpointId, message: checkpointId \? 'Code was reset to an earlier point\.' : undefined \}\);/);
 		assert.match(panelSource, /this\.postResetRestoreState\(appliedPlan\.safetyCheckpointId\);/);
 	});
