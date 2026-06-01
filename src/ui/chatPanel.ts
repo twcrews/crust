@@ -1335,7 +1335,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private postResetRestoreState(checkpointId: string | undefined): void {
-		this.post({ type: 'resetRestoreState', checkpointId, message: checkpointId ? 'Code was reset to an earlier point.' : undefined });
+		this.post({ type: 'resetRestoreState', checkpointId, message: checkpointId ? 'Changes reverted.' : undefined });
 	}
 
 	private showResetDialog(options: { title: string; detail?: string; confirmLabel: string; cancelLabel?: string; severity: 'info' | 'warning' | 'error' }): Promise<boolean> {

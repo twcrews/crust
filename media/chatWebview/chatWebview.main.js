@@ -72,7 +72,7 @@ function requestCancelCurrentTask(source) {
 
 function setResetRestoreState(checkpointId, message) {
 	resetRestoreCheckpointId = checkpointId || "";
-	resetRestoreMessage.textContent = message || "Code was reset to an earlier point.";
+	resetRestoreMessage.textContent = message || "Changes reverted.";
 	const visible = Boolean(resetRestoreCheckpointId);
 	resetRestoreBanner.classList.toggle("hidden", !visible);
 	messages.classList.toggle("has-reset-restore-banner", visible);
