@@ -733,6 +733,27 @@ suite('Reversion manager', () => {
 		assert.strictEqual(plan.affectedFiles[0]?.expectedCurrent?.content, 'alpha\nbeta\ngamma\n');
 	});
 
+	test('builds reset plans from detail files when the session index is incomplete', async () => {
+		const file = join(directory, 'example.ts');
+		const sessionPath = '/tmp/session.jsonl';
+		await writeFile(file, 'alpha\n');
+		const first = await manager.createCheckpoint({ sessionPath, promptMessageId: 'user-1', promptText: 'First change', promptIndex: 0 });
+		await manager.recordFileMutationStart(first.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'alpha\nbeta\n');
+		await manager.recordFileMutationEnd(first.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		const second = await manager.createCheckpoint({ sessionPath, promptMessageId: 'user-2', promptText: 'Second change', promptIndex: 1 });
+		await manager.recordFileMutationStart(second.id, { toolCallId: 'call-2', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'alpha\nbeta\ngamma\n');
+		await manager.recordFileMutationEnd(second.id, { toolCallId: 'call-2', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(join(storageDirectory, 'workspace', 'reversion', 'index.json'), `${JSON.stringify({ version: 2, workspaces: {} })}\n`, 'utf8');
+
+		const plan = await manager.buildResetPlan(first.id);
+		assert.strictEqual(plan.conflicts.length, 0);
+		assert.strictEqual(plan.stats.affectedFileCount, 1);
+		assert.strictEqual(plan.affectedFiles[0]?.target.content, 'alpha\n');
+		assert.strictEqual(plan.affectedFiles[0]?.expectedCurrent?.content, 'alpha\nbeta\ngamma\n');
+	});
+
 	test('builds no-op reset plans when files already match the target checkpoint', async () => {
 		const file = join(directory, 'example.ts');
 		await writeFile(file, 'before\n');

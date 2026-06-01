@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { getMessageRole, getMessageText, parseJsonObject } from './messageUtils';
@@ -284,10 +284,8 @@ export class ReversionManager {
 			throw new Error(`Reversion checkpoint not found: ${checkpointId}`);
 		}
 
-		const summaries = (await this.listSessionCheckpoints(targetCheckpoint.sessionPath, targetCheckpoint.workspaceRoot))
-			.filter((summary) => summary.promptIndex >= targetCheckpoint.promptIndex)
-			.sort((left, right) => left.promptIndex - right.promptIndex || left.createdAt.localeCompare(right.createdAt));
-		const checkpoints = (await Promise.all(summaries.map((summary) => this.getCheckpoint(summary.id))))
+		const summaries = await this.getResetCandidateSummaries(targetCheckpoint);
+		const checkpoints = (await Promise.all(summaries.map((summary) => summary.id === targetCheckpoint.id ? targetCheckpoint : this.getCheckpoint(summary.id))))
 			.filter((checkpoint): checkpoint is ReversionCheckpoint => checkpoint !== undefined);
 		const changesByPath = new Map<string, ResetFileChange>();
 		let unsafeMutationCount = 0;
@@ -455,6 +453,40 @@ export class ReversionManager {
 			}
 			await this.writeCheckpoint({ ...checkpoint, promptIndex });
 		}));
+	}
+
+	private async getResetCandidateSummaries(targetCheckpoint: ReversionCheckpoint): Promise<ReversionCheckpointSummary[]> {
+		const summaryById = new Map<string, ReversionCheckpointSummary>();
+		const add = (summary: ReversionCheckpointSummary) => {
+			if (summary.sessionPath === targetCheckpoint.sessionPath
+				&& summary.workspaceRoot === targetCheckpoint.workspaceRoot
+				&& summary.promptIndex >= targetCheckpoint.promptIndex) {
+				summaryById.set(summary.id, summary);
+			}
+		};
+		(await this.listSessionCheckpoints(targetCheckpoint.sessionPath, targetCheckpoint.workspaceRoot)).forEach(add);
+		(await this.listCheckpointsFromDetailFiles(targetCheckpoint.workspaceRoot)).forEach(add);
+		add(toSummary(targetCheckpoint));
+		return [...summaryById.values()].sort((left, right) => left.promptIndex - right.promptIndex || left.createdAt.localeCompare(right.createdAt));
+	}
+
+	private async listCheckpointsFromDetailFiles(workspaceRoot: string): Promise<ReversionCheckpointSummary[]> {
+		try {
+			const entries = await readdir(this.getCheckpointsDirectory(), { withFileTypes: true });
+			const checkpoints = await Promise.all(entries
+				.filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+				.map(async (entry) => {
+					try {
+						const checkpoint = normalizeCheckpoint(JSON.parse(await readFile(join(this.getCheckpointsDirectory(), entry.name), 'utf8')) as unknown);
+						return checkpoint?.workspaceRoot === workspaceRoot ? toSummary(checkpoint) : undefined;
+					} catch {
+						return undefined;
+					}
+				}));
+			return checkpoints.filter((checkpoint): checkpoint is ReversionCheckpointSummary => checkpoint !== undefined);
+		} catch {
+			return [];
+		}
 	}
 
 	private async listSessionCheckpoints(sessionPath: string | undefined, workspaceRoot: string): Promise<ReversionCheckpointSummary[]> {
