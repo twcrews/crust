@@ -141,16 +141,15 @@
 	transition: opacity 80ms ease-out, background 80ms ease-out;
 }
 .user:hover .reset-checkpoint-button,
-.user:focus-within .reset-checkpoint-button {
+.reset-checkpoint-button:focus-visible {
 	opacity: 1;
 	pointer-events: auto;
 }
 .reset-checkpoint-button:hover {
-	background: var(--vscode-button-secondaryHoverBackground, var(--vscode-editorWidget-background, var(--vscode-button-hoverBackground)));
+	background: var(--vscode-list-activeSelectionBackground, var(--vscode-button-secondaryHoverBackground, var(--vscode-editorWidget-background)));
+	color: var(--vscode-list-activeSelectionForeground, var(--vscode-editorWidget-foreground, var(--vscode-button-foreground)));
 }
 .reset-checkpoint-button:focus-visible {
-	opacity: 1;
-	pointer-events: auto;
 	outline: 1px solid var(--vscode-focusBorder);
 	outline-offset: 2px;
 }

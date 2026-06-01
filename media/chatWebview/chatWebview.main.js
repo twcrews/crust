@@ -91,8 +91,10 @@ function respondToModal(action) {
 	activeModalRequestId = 0;
 	modalBackdrop.classList.add("hidden");
 	vscode.postMessage({ type: "resetDialogResponse", requestId, action });
-	if (previousModalFocus && document.contains(previousModalFocus)) {
+	if (previousModalFocus && document.contains(previousModalFocus) && !previousModalFocus.classList.contains("reset-checkpoint-button")) {
 		previousModalFocus.focus();
+	} else if (previousModalFocus) {
+		previousModalFocus.blur();
 	}
 	previousModalFocus = null;
 }

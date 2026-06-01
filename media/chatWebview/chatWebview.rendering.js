@@ -124,6 +124,7 @@ function createResetCheckpointButton(checkpointId) {
 	button.addEventListener("click", (event) => {
 		event.preventDefault();
 		event.stopPropagation();
+		button.blur();
 		vscode.postMessage({ type: "requestResetToCheckpoint", checkpointId });
 	});
 	return button;
