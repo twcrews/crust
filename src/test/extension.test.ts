@@ -174,6 +174,40 @@ suite('Pi RPC client', () => {
 		assert.deepStrictEqual(sentTypes, ['clone']);
 	});
 
+	test('returns fork messages and forks by entry id from Pi RPC', async () => {
+		type TestableClient = {
+			start: () => Promise<void>;
+			process?: { stdin: { write: (payload: string, callback: (error?: Error) => void) => void } };
+			handleStdout: (chunk: string) => void;
+		};
+
+		const client = new PiRpcClient(undefined);
+		const testable = client as unknown as TestableClient;
+		const sent: unknown[] = [];
+		testable.start = async () => {
+			testable.process = {
+				stdin: {
+					write: (payload, callback) => {
+						const command = JSON.parse(payload) as { id: string; type: string; entryId?: string };
+						sent.push(command);
+						callback();
+						const data = command.type === 'get_fork_messages'
+							? { messages: [{ entryId: 'entry-1', text: 'First prompt' }, { entryId: 2, text: 'bad' }] }
+							: { cancelled: false };
+						testable.handleStdout(`${JSON.stringify({ type: 'response', id: command.id, command: command.type, success: true, data })}\n`);
+					},
+				},
+			};
+		};
+
+		assert.deepStrictEqual(await client.getForkMessages(), [{ entryId: 'entry-1', text: 'First prompt' }]);
+		assert.strictEqual(await client.fork('entry-1'), true);
+		assert.deepStrictEqual(sent.map((command) => ({ type: (command as { type: string }).type, entryId: (command as { entryId?: string }).entryId })), [
+			{ type: 'get_fork_messages', entryId: undefined },
+			{ type: 'fork', entryId: 'entry-1' },
+		]);
+	});
+
 	test('returns exported HTML path from Pi RPC', async () => {
 		type TestableClient = {
 			start: () => Promise<void>;
@@ -208,7 +242,7 @@ suite('Slash commands', () => {
 		process.env.PATH = '';
 		try {
 			const commands = await getBuiltinSlashCommands(() => undefined);
-			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'clone', 'export', 'name', 'session', 'resume', 'model', 'copy', 'changelog', 'reload', 'quit']);
+			assert.deepStrictEqual(commands.map((command) => command.name), ['new', 'compact', 'clone', 'fork', 'export', 'name', 'session', 'resume', 'model', 'copy', 'changelog', 'reload', 'quit']);
 			assert.ok(commands.every((command) => command.source === 'builtin'));
 		} finally {
 			process.env.PATH = originalPath;

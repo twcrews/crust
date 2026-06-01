@@ -31,6 +31,7 @@ const modalBackdrop = document.getElementById("modal-backdrop");
 const modalTitle = document.getElementById("modal-title");
 const modalDetail = document.getElementById("modal-detail");
 const modalIcon = document.getElementById("modal-icon");
+const modalSelect = document.getElementById("modal-select");
 const modalCancel = document.getElementById("modal-cancel");
 const modalConfirm = document.getElementById("modal-confirm");
 let includeIdeContextByDefault = window.crustInitialSettings?.includeIdeContextByDefault === true;

@@ -91,17 +91,45 @@ resetRestoreDismiss.addEventListener("click", () => {
 	setResetRestoreState("", "");
 });
 
+function updateModalConfirmState() {
+	modalConfirm.disabled = !modalSelect.hidden && !modalSelect.value;
+}
+
 function showModal(message) {
 	activeModalRequestId = message.requestId;
 	previousModalFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 	modalTitle.textContent = message.title;
 	modalDetail.textContent = message.detail || "";
+	modalSelect.textContent = "";
+	const options = Array.isArray(message.options) ? message.options : [];
+	modalSelect.hidden = options.length === 0;
+	if (options.length) {
+		const placeholder = document.createElement("option");
+		placeholder.value = "";
+		placeholder.textContent = "Select a prompt...";
+		placeholder.disabled = true;
+		placeholder.selected = true;
+		modalSelect.append(placeholder);
+	}
+	for (const option of options) {
+		const element = document.createElement("option");
+		element.value = typeof option.value === "string" ? option.value : "";
+		element.textContent = typeof option.label === "string" ? option.label : element.value;
+		if (typeof option.description === "string" && option.description) {
+			element.title = option.description;
+		}
+		modalSelect.append(element);
+	}
+	if (typeof message.selectedValue === "string") {
+		modalSelect.value = message.selectedValue;
+	}
 	modalConfirm.textContent = message.confirmLabel || "OK";
 	modalCancel.textContent = message.cancelLabel || "Cancel";
 	modalCancel.hidden = !message.cancelLabel;
 	modalIcon.className = `modal-icon ${message.severity === "warning" || message.severity === "error" ? message.severity : ""}`.trim();
+	updateModalConfirmState();
 	modalBackdrop.classList.remove("hidden");
-	(modalCancel.hidden ? modalConfirm : modalCancel).focus();
+	(options.length ? modalSelect : (modalCancel.hidden ? modalConfirm : modalCancel)).focus();
 }
 
 function respondToModal(action) {
@@ -111,7 +139,11 @@ function respondToModal(action) {
 	const requestId = activeModalRequestId;
 	activeModalRequestId = 0;
 	modalBackdrop.classList.add("hidden");
-	vscode.postMessage({ type: "resetDialogResponse", requestId, action });
+	if (modalSelect.hidden) {
+		vscode.postMessage({ type: "resetDialogResponse", requestId, action });
+	} else {
+		vscode.postMessage({ type: "resetDialogResponse", requestId, action, selectedValue: modalSelect.value });
+	}
 	if (previousModalFocus && document.contains(previousModalFocus) && !previousModalFocus.classList.contains("reset-checkpoint-button")) {
 		previousModalFocus.focus();
 	} else if (previousModalFocus) {
@@ -252,6 +284,7 @@ newChat.addEventListener("click", () => {
 	vscode.postMessage({ type: "newChat" });
 });
 
+modalSelect.addEventListener("change", updateModalConfirmState);
 modalConfirm.addEventListener("click", () => respondToModal("confirm"));
 modalCancel.addEventListener("click", () => respondToModal("cancel"));
 modalBackdrop.addEventListener("click", (event) => {
@@ -334,7 +367,7 @@ function parseExtensionMessage(value) {
 			return { type: "chatSettings", includeIdeContextByDefault: value.includeIdeContextByDefault === true };
 		case "resetDialog":
 			return typeof value.requestId === "number" && typeof value.title === "string"
-				? { type: "resetDialog", requestId: value.requestId, title: value.title, detail: stringValue(value.detail), confirmLabel: stringValue(value.confirmLabel, "OK"), cancelLabel: stringValue(value.cancelLabel, undefined), severity: stringValue(value.severity, "info") }
+				? { type: "resetDialog", requestId: value.requestId, title: value.title, detail: stringValue(value.detail), confirmLabel: stringValue(value.confirmLabel, "OK"), cancelLabel: stringValue(value.cancelLabel, undefined), severity: stringValue(value.severity, "info"), options: arrayValue(value.options), selectedValue: stringValue(value.selectedValue, undefined) }
 				: null;
 		case "resetRestoreState":
 			return { type: "resetRestoreState", checkpointId: stringValue(value.checkpointId), message: stringValue(value.message) };

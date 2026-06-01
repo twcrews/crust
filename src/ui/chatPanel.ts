@@ -198,7 +198,7 @@ export class CrustChatPanel implements vscode.Disposable {
 	private submittedPromptCount = 0;
 	private readonly activeToolArgs = new Map<string, unknown>();
 	private resetDialogRequestId = 0;
-	private readonly pendingResetDialogs = new Map<number, (confirmed: boolean) => void>();
+	private readonly pendingResetDialogs = new Map<number, (response: { confirmed: boolean; selectedValue?: string }) => void>();
 
 	static show(context: vscode.ExtensionContext): void {
 		void CrustChatPanel.open(context);
@@ -321,7 +321,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		CrustChatPanel.onDidChangeOpenSessionsEmitter.fire();
 		this.client.dispose();
 		for (const resolve of this.pendingResetDialogs.values()) {
-			resolve(false);
+			resolve({ confirmed: false });
 		}
 		this.pendingResetDialogs.clear();
 		this.disposeSessionWatcher();
@@ -437,7 +437,7 @@ export class CrustChatPanel implements vscode.Disposable {
 				await this.resetCodeToCheckpoint(message.checkpointId, { skipConfirmation: message.skipConfirmation });
 				break;
 			case 'resetDialogResponse':
-				this.resolveResetDialog(message.requestId, message.action === 'confirm');
+				this.resolveResetDialog(message.requestId, message.action === 'confirm', message.selectedValue);
 				break;
 			case 'webviewLog':
 				if (message.level === 'warn' || message.level === 'error') {
@@ -798,6 +798,11 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private async runSlashCommand(commandName: string, commandText: string): Promise<void> {
+		if (commandName === 'fork') {
+			await this.forkSession(commandText.trim() || '/fork');
+			return;
+		}
+
 		if (this.piSlashCommands.some((command) => command.name === commandName)) {
 			const invocation = commandText.trim() || `/${commandName}`;
 			await this.submitPrompt(invocation, false, { text: '', slashCommandLabel: invocation.split(/\r?\n/, 1)[0] });
@@ -846,6 +851,9 @@ export class CrustChatPanel implements vscode.Disposable {
 				return;
 			case 'clone':
 				await this.cloneSession(commandText.trim() || '/clone');
+				return;
+			case 'fork':
+				await this.forkSession(commandText.trim() || '/fork');
 				return;
 			case 'export':
 				await this.exportSession(commandText.trim() || '/export');
@@ -949,6 +957,67 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: `Session exported to: \`${exportedPath || outputPath || 'session.html'}\``, secondary: true });
 		} catch (error) {
 			this.postError(errorMessage(error), { operation: 'exportSession' });
+		}
+	}
+
+	private async forkSession(invocation: string): Promise<void> {
+		if (this.conversationState.isProcessing || this.conversationState.isStreaming) {
+			void vscode.window.showInformationMessage('Wait for the current response to finish before forking the session.');
+			return;
+		}
+
+		this.log('Forking current session');
+		if (!this.conversationState.hasSessionTitle) {
+			this.setSessionTitleFromPrompt(invocation);
+		}
+		this.post({ type: 'addMessage', id: createId('user'), role: 'user', text: '', slashCommandLabel: invocation });
+
+		try {
+			const forkMessages = await this.client.getForkMessages();
+			if (!forkMessages.length) {
+				this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: 'No previous prompts are available to fork from.', secondary: true });
+				return;
+			}
+
+			const selected = await this.showSelectionDialog({
+				title: 'Fork session from which prompt?',
+				detail: 'Choose a prompt from the current session. Pi will create a new session fork at that point.',
+				confirmLabel: 'Fork Session',
+				cancelLabel: 'Cancel',
+				severity: 'info',
+				options: forkMessages.map((message, index) => ({
+					value: message.entryId,
+					label: `${index + 1}. ${truncate(message.text.replace(/\s+/g, ' '), 100)}`,
+					description: message.text,
+				})),
+			});
+			if (!selected.confirmed || !selected.selectedValue) {
+				this.post({ type: 'status', message: 'Fork cancelled.' });
+				return;
+			}
+
+			this.setProcessing(true);
+			this.post({ type: 'status', message: 'Forking session...' });
+			const forked = await this.client.fork(selected.selectedValue);
+			if (!forked) {
+				this.post({ type: 'status', message: 'Fork cancelled.' });
+				return;
+			}
+
+			this.resetConversationState();
+			this.post({ type: 'clearMessages' });
+			this.submittedPromptCount = 0;
+			const messages = await this.client.getMessages();
+			this.submittedPromptCount = messages.filter((message) => getMessageRole(message) === 'user').length;
+			await this.restoreMessages(messages);
+			await this.postCurrentSessionPath();
+			this.post({ type: 'addMessage', id: createId('assistant'), role: 'assistant', text: 'Forked to new session.', secondary: true });
+			void this.refreshCurrentModel();
+			void this.refreshSlashCommands();
+		} catch (error) {
+			this.postError(errorMessage(error), { operation: 'forkSession' });
+		} finally {
+			this.setProcessing(false);
 		}
 	}
 
@@ -1346,6 +1415,10 @@ export class CrustChatPanel implements vscode.Disposable {
 	}
 
 	private showResetDialog(options: { title: string; detail?: string; confirmLabel: string; cancelLabel?: string; severity: 'info' | 'warning' | 'error' }): Promise<boolean> {
+		return this.showSelectionDialog(options).then((response) => response.confirmed);
+	}
+
+	private showSelectionDialog(options: { title: string; detail?: string; confirmLabel: string; cancelLabel?: string; severity: 'info' | 'warning' | 'error'; options?: { value: string; label: string; description?: string }[]; selectedValue?: string }): Promise<{ confirmed: boolean; selectedValue?: string }> {
 		const requestId = ++this.resetDialogRequestId;
 		this.post({ type: 'resetDialog', requestId, ...options });
 		return new Promise((resolve) => {
@@ -1353,13 +1426,13 @@ export class CrustChatPanel implements vscode.Disposable {
 		});
 	}
 
-	private resolveResetDialog(requestId: number, confirmed: boolean): void {
+	private resolveResetDialog(requestId: number, confirmed: boolean, selectedValue?: string): void {
 		const resolve = this.pendingResetDialogs.get(requestId);
 		if (!resolve) {
 			return;
 		}
 		this.pendingResetDialogs.delete(requestId);
-		resolve(confirmed);
+		resolve({ confirmed, selectedValue });
 	}
 
 	private async selectModel(selectedModelKey: string | undefined): Promise<void> {

@@ -9,6 +9,8 @@ type PendingRequest = {
 	reject: (error: Error) => void;
 };
 
+export type ForkMessage = { entryId: string; text: string };
+
 export class PiRpcClient implements vscode.Disposable {
 	private static readonly output = vscode.window.createOutputChannel('Crust Pi RPC');
 	private process: ChildProcessWithoutNullStreams | undefined;
@@ -119,6 +121,18 @@ export class PiRpcClient implements vscode.Disposable {
 
 	async clone(): Promise<boolean> {
 		const response = await this.send({ type: 'clone' });
+		const data = response.data as { cancelled?: boolean } | undefined;
+		return !data?.cancelled;
+	}
+
+	async getForkMessages(): Promise<ForkMessage[]> {
+		const response = await this.send({ type: 'get_fork_messages' });
+		const data = response.data as { messages?: unknown[] } | undefined;
+		return Array.isArray(data?.messages) ? data.messages.filter(isForkMessage) : [];
+	}
+
+	async fork(entryId: string): Promise<boolean> {
+		const response = await this.send({ type: 'fork', entryId });
 		const data = response.data as { cancelled?: boolean } | undefined;
 		return !data?.cancelled;
 	}
@@ -269,6 +283,11 @@ export class PiRpcClient implements vscode.Disposable {
 	}
 }
 
+
+function isForkMessage(value: unknown): value is ForkMessage {
+	const record = typeof value === 'object' && value !== null ? value as { entryId?: unknown; text?: unknown } : undefined;
+	return typeof record?.entryId === 'string' && typeof record.text === 'string';
+}
 
 function isDefined<T>(value: T | undefined): value is T {
 	return value !== undefined;
