@@ -13,15 +13,17 @@ export function restoreSessionMessages(
 	sessionName: string | undefined,
 	post: PostFn,
 	getSlashCommandLabel: (text: string) => string | undefined,
-	getCheckpointIdForPromptIndex?: (promptIndex: number) => string | undefined,
+	getCheckpointIdForPrompt?: (promptIndex: number, promptText: string) => string | undefined,
 ): { title: string; hasSessionTitle: boolean } {
 	const restoredToolCalls = new Map<string, RestoredToolCall>();
 	let firstUserMessage: string | undefined;
-	let promptIndex = 0;
+	let promptIndex = -1;
 	for (const message of messages) {
 		const role = getMessageRole(message);
-		const checkpointId = role === 'user' ? getCheckpointIdForPromptIndex?.(++promptIndex) : undefined;
-		const restoredFirstUserMessage = restoreMessage(message, restoredToolCalls, post, getSlashCommandLabel, checkpointId);
+		if (role === 'user') {
+			promptIndex += 1;
+		}
+		const restoredFirstUserMessage = restoreMessage(message, restoredToolCalls, post, getSlashCommandLabel, role === 'user' ? promptIndex : undefined, getCheckpointIdForPrompt);
 		firstUserMessage ??= restoredFirstUserMessage;
 	}
 
@@ -34,12 +36,14 @@ function restoreMessage(
 	toolCalls: Map<string, RestoredToolCall>,
 	post: PostFn,
 	getSlashCommandLabel: (text: string) => string | undefined,
-	checkpointId?: string,
+	promptIndex?: number,
+	getCheckpointIdForPrompt?: (promptIndex: number, promptText: string) => string | undefined,
 ): string | undefined {
 	const role = getMessageRole(message);
 	if (role === 'user') {
 		const restoredPrompt = extractRestoredPrompt(getMessageText(message).trim());
 		const slashCommandLabel = restoredPrompt.skillLabel ?? getSlashCommandLabel(restoredPrompt.text);
+		const checkpointId = promptIndex === undefined ? undefined : getCheckpointIdForPrompt?.(promptIndex, restoredPrompt.text);
 		if (restoredPrompt.text || slashCommandLabel) {
 			post({
 				type: 'addMessage',

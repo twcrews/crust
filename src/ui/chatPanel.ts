@@ -617,6 +617,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			this.resetConversationState();
 			this.post({ type: 'clearMessages' });
 			this.post({ type: 'sessionTitle', title: 'New Chat' });
+			this.submittedPromptCount = 0;
 			await this.postCurrentSessionPath();
 			await this.postSessionStatus([]);
 			this.postIdeContext();
@@ -672,6 +673,7 @@ export class CrustChatPanel implements vscode.Disposable {
 		this.watchSessionFile(session.path);
 
 		const messages = await this.client.getMessages();
+		this.submittedPromptCount = messages.filter((message) => getMessageRole(message) === 'user').length;
 		this.log('Fetched session messages', { count: messages.length });
 		await this.restoreMessages(messages, session.name);
 		await this.postCurrentSessionPath();
@@ -680,7 +682,19 @@ export class CrustChatPanel implements vscode.Disposable {
 	private async restoreMessages(messages: unknown[], sessionName?: string): Promise<void> {
 		const checkpoints = await this.reversionManager.listCheckpoints(this.activeSessionPath);
 		const checkpointByPromptIndex = new Map(checkpoints.map((checkpoint) => [checkpoint.promptIndex, checkpoint.id]));
-		const restored = restoreSessionMessages(messages, sessionName, (message) => this.post(message), (text) => this.getSlashCommandLabel(text), (promptIndex) => checkpointByPromptIndex.get(promptIndex));
+		const checkpointsByPromptText = new Map<string, string[]>();
+		for (const checkpoint of checkpoints) {
+			const entries = checkpointsByPromptText.get(checkpoint.promptText) ?? [];
+			entries.push(checkpoint.id);
+			checkpointsByPromptText.set(checkpoint.promptText, entries);
+		}
+		const restored = restoreSessionMessages(messages, sessionName, (message) => this.post(message), (text) => this.getSlashCommandLabel(text), (promptIndex, promptText) => {
+			const checkpointId = checkpointByPromptIndex.get(promptIndex);
+			if (checkpointId) {
+				return checkpointId;
+			}
+			return checkpointsByPromptText.get(promptText)?.shift();
+		});
 		this.conversationState.hasSessionTitle = restored.hasSessionTitle;
 		this.post({ type: 'sessionTitle', title: restored.title });
 		await this.postSessionStatus(messages);
@@ -1157,7 +1171,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			sessionPath: this.activeSessionPath,
 			promptMessageId: userMessageId,
 			promptText: displayText,
-			promptIndex: ++this.submittedPromptCount,
+			promptIndex: this.submittedPromptCount++,
 		});
 		this.activeReversionCheckpointId = checkpoint.id;
 		this.conversationState.activeLoadingMessageId = createId('loading');

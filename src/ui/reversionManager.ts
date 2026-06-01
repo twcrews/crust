@@ -4,7 +4,8 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import * as vscode from 'vscode';
 
-const reversionVersion = 1;
+const reversionVersion = 2;
+const legacyReversionVersion = 1;
 const maxCheckpointsPerSession = 100;
 const unsavedSessionKey = '__unsaved_session__';
 
@@ -156,7 +157,7 @@ export class ReversionManager {
 		}
 
 		const parsed = JSON.parse(await readFile(file, 'utf8')) as unknown;
-		return isCheckpoint(parsed) ? parsed : undefined;
+		return normalizeCheckpoint(parsed);
 	}
 
 	async listCheckpoints(sessionPath?: string, workspaceRoot = this.defaultWorkspaceRoot): Promise<ReversionCheckpointSummary[]> {
@@ -368,10 +369,10 @@ export class ReversionManager {
 			throw new Error(`Reversion checkpoint not found: ${plan.checkpointId}`);
 		}
 		const summaries = await this.listSessionCheckpoints(targetCheckpoint.sessionPath, targetCheckpoint.workspaceRoot);
-		const promptIndex = Math.max(0, ...summaries.map((summary) => summary.promptIndex)) + 1;
+		const promptIndex = Math.max(-1, ...summaries.map((summary) => summary.promptIndex)) + 1;
 		const checkpoint = await this.createCheckpoint({
 			sessionPath: targetCheckpoint.sessionPath,
-			promptText: `Before reset to prompt ${targetCheckpoint.promptIndex}`,
+			promptText: `Before reset to prompt ${targetCheckpoint.promptIndex + 1}`,
 			promptIndex,
 			workspaceRoot: targetCheckpoint.workspaceRoot,
 		});
@@ -427,7 +428,7 @@ export class ReversionManager {
 
 		try {
 			const parsed = JSON.parse(await readFile(file, 'utf8')) as unknown;
-			return isIndex(parsed) ? parsed : createEmptyIndex();
+			return isIndex(parsed) ? normalizeIndex(parsed) : createEmptyIndex();
 		} catch {
 			return createEmptyIndex();
 		}
@@ -552,25 +553,78 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 function isIndex(value: unknown): value is ReversionIndex {
-	if (!isRecord(value) || value.version !== reversionVersion || !isRecord(value.workspaces)) {
+	if (!isRecord(value) || value.version !== reversionVersion && value.version !== legacyReversionVersion || !isRecord(value.workspaces)) {
 		return false;
 	}
 	return true;
 }
 
-function isCheckpoint(value: unknown): value is ReversionCheckpoint {
-	return isRecord(value)
-		&& value.version === reversionVersion
-		&& typeof value.id === 'string'
-		&& typeof value.promptMessageId === 'string'
-		&& typeof value.promptText === 'string'
-		&& typeof value.promptIndex === 'number'
-		&& typeof value.createdAt === 'string'
-		&& typeof value.workspaceRoot === 'string'
-		&& typeof value.mutationCount === 'number'
-		&& typeof value.unsafeMutationCount === 'number'
-		&& Array.isArray(value.mutations)
-		&& Array.isArray(value.unsafeMutations);
+function normalizeIndex(index: ReversionIndex): ReversionIndex {
+	for (const workspace of Object.values(index.workspaces)) {
+		for (const session of Object.values(workspace.sessions)) {
+			session.checkpoints = session.checkpoints
+				.map((summary) => normalizeCheckpointSummary(summary, index.version))
+				.filter((summary): summary is ReversionCheckpointSummary => summary !== undefined);
+		}
+	}
+	return index;
+}
+
+function normalizeCheckpoint(value: unknown): ReversionCheckpoint | undefined {
+	if (!isRecord(value)
+		|| value.version !== reversionVersion && value.version !== legacyReversionVersion
+		|| typeof value.id !== 'string'
+		|| typeof value.promptMessageId !== 'string'
+		|| typeof value.promptText !== 'string'
+		|| typeof value.createdAt !== 'string'
+		|| typeof value.workspaceRoot !== 'string'
+		|| typeof value.mutationCount !== 'number'
+		|| typeof value.unsafeMutationCount !== 'number'
+		|| !Array.isArray(value.mutations)
+		|| !Array.isArray(value.unsafeMutations)) {
+		return undefined;
+	}
+	const promptIndex = getStoredPromptIndex(value, value.version);
+	if (promptIndex === undefined) {
+		return undefined;
+	}
+	const { promptIndex: _promptIndex, version: _version, ...checkpoint } = value;
+	return { ...checkpoint, version: reversionVersion, promptIndex } as ReversionCheckpoint;
+}
+
+function normalizeCheckpointSummary(value: unknown, version: unknown): ReversionCheckpointSummary | undefined {
+	if (!isRecord(value)
+		|| typeof value.id !== 'string'
+		|| typeof value.promptMessageId !== 'string'
+		|| typeof value.promptText !== 'string'
+		|| typeof value.createdAt !== 'string'
+		|| typeof value.workspaceRoot !== 'string'
+		|| typeof value.mutationCount !== 'number'
+		|| typeof value.unsafeMutationCount !== 'number') {
+		return undefined;
+	}
+	const promptIndex = getStoredPromptIndex(value, version);
+	if (promptIndex === undefined) {
+		return undefined;
+	}
+	return {
+		id: value.id,
+		sessionPath: typeof value.sessionPath === 'string' ? value.sessionPath : undefined,
+		promptMessageId: value.promptMessageId,
+		promptText: value.promptText,
+		promptIndex,
+		createdAt: value.createdAt,
+		workspaceRoot: value.workspaceRoot,
+		mutationCount: value.mutationCount,
+		unsafeMutationCount: value.unsafeMutationCount,
+	};
+}
+
+function getStoredPromptIndex(value: Record<string, unknown>, version: unknown): number | undefined {
+	if (typeof value.promptIndex !== 'number') {
+		return undefined;
+	}
+	return version === legacyReversionVersion ? Math.max(0, value.promptIndex - 1) : value.promptIndex;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

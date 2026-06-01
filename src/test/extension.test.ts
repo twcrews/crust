@@ -452,17 +452,27 @@ suite('Session restore rendering', () => {
 		assert.ok(posts.some((post) => (post as { compaction?: boolean; text?: string }).compaction === true && (post as { text?: string }).text?.includes('12k tokens summarized')));
 	});
 
-	test('reattaches checkpoint ids to restored user prompts by prompt index', () => {
+	test('reattaches checkpoint ids to restored user prompts by zero-based prompt index', () => {
 		const posts: unknown[] = [];
 		restoreSessionMessages([
 			{ role: 'user', content: 'First' },
 			{ role: 'assistant', content: 'Answer' },
 			{ role: 'user', content: 'Second' },
-		], undefined, (message) => posts.push(message), () => undefined, (promptIndex) => promptIndex === 2 ? 'checkpoint-2' : undefined);
+		], undefined, (message) => posts.push(message), () => undefined, (promptIndex) => promptIndex === 1 ? 'checkpoint-2' : undefined);
 
 		const userMessages = posts.filter((post) => (post as { role?: string }).role === 'user');
 		assert.strictEqual((userMessages[0] as { checkpointId?: string }).checkpointId, undefined);
 		assert.strictEqual((userMessages[1] as { checkpointId?: string }).checkpointId, 'checkpoint-2');
+	});
+
+	test('passes restored prompt text when reattaching checkpoints', () => {
+		const posts: unknown[] = [];
+		restoreSessionMessages([
+			{ role: 'user', content: 'Find me by text' },
+		], undefined, (message) => posts.push(message), () => undefined, (_promptIndex, promptText) => promptText === 'Find me by text' ? 'checkpoint-by-text' : undefined);
+
+		const userMessages = posts.filter((post) => (post as { role?: string }).role === 'user');
+		assert.strictEqual((userMessages[0] as { checkpointId?: string }).checkpointId, 'checkpoint-by-text');
 	});
 });
 
@@ -580,8 +590,8 @@ suite('Reversion manager', () => {
 	});
 
 	test('creates and persists prompt checkpoints', async () => {
-		const first = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'First prompt', promptIndex: 1 });
-		const second = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-2', promptText: 'Second prompt', promptIndex: 2 });
+		const first = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'First prompt', promptIndex: 0 });
+		const second = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-2', promptText: 'Second prompt', promptIndex: 1 });
 
 		assert.strictEqual(first.promptText, 'First prompt');
 		assert.strictEqual(first.workspaceRoot, directory);
@@ -599,6 +609,42 @@ suite('Reversion manager', () => {
 		}, directory);
 		const checkpoints = await reloaded.listCheckpoints('/tmp/session.jsonl');
 		assert.deepStrictEqual(checkpoints.map((checkpoint) => checkpoint.id), [first.id, second.id]);
+	});
+
+	test('migrates legacy one-based prompt indexes to zero-based prompt indexes', async () => {
+		const reversionDirectory = join(storageDirectory, 'workspace', 'reversion');
+		const checkpointDirectory = join(reversionDirectory, 'checkpoints');
+		await mkdir(checkpointDirectory, { recursive: true });
+		const sessionPath = '/tmp/legacy-session.jsonl';
+		const checkpoint = {
+			version: 1,
+			id: 'checkpoint-legacy',
+			sessionPath,
+			promptMessageId: 'user-legacy',
+			promptText: 'Legacy prompt',
+			promptIndex: 2,
+			createdAt: '2026-01-01T00:00:00.000Z',
+			workspaceRoot: directory,
+			mutationCount: 0,
+			unsafeMutationCount: 0,
+			mutations: [],
+			unsafeMutations: [],
+		};
+		await writeFile(join(checkpointDirectory, 'checkpoint-legacy.json'), `${JSON.stringify(checkpoint)}\n`, 'utf8');
+		await writeFile(join(reversionDirectory, 'index.json'), `${JSON.stringify({
+			version: 1,
+			workspaces: {
+				[hashContent(directory)]: {
+					workspaceRoot: directory,
+					sessions: {
+						[hashContent(sessionPath)]: { sessionPath, checkpoints: [checkpoint] },
+					},
+				},
+			},
+		})}\n`, 'utf8');
+
+		assert.strictEqual((await manager.listCheckpoints(sessionPath))[0]?.promptIndex, 1);
+		assert.strictEqual((await manager.getCheckpoint('checkpoint-legacy'))?.promptIndex, 1);
 	});
 
 	test('reads file snapshots with hashes and line counts', async () => {
@@ -619,7 +665,7 @@ suite('Reversion manager', () => {
 		const file = join(directory, 'src', 'example.ts');
 		await mkdir(join(directory, 'src'), { recursive: true });
 		await writeFile(file, 'old\n');
-		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 0 });
 
 		await manager.recordFileMutationStart(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'src/example.ts' });
 		await writeFile(file, 'new\nline\n');
@@ -637,7 +683,7 @@ suite('Reversion manager', () => {
 	});
 
 	test('records unsafe mutations once per tool call', async () => {
-		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Run shell', promptIndex: 1 });
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Run shell', promptIndex: 0 });
 
 		await manager.recordUnsafeMutation(checkpoint.id, { toolCallId: 'call-1', toolName: 'bash', description: 'npm test' });
 		await manager.recordUnsafeMutation(checkpoint.id, { toolCallId: 'call-1', toolName: 'bash', description: 'npm test' });
@@ -651,12 +697,12 @@ suite('Reversion manager', () => {
 	test('builds reset plans with affected file and line stats', async () => {
 		const file = join(directory, 'example.ts');
 		await writeFile(file, 'alpha\n');
-		const first = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'First change', promptIndex: 1 });
+		const first = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'First change', promptIndex: 0 });
 		await manager.recordFileMutationStart(first.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
 		await writeFile(file, 'alpha\nbeta\n');
 		await manager.recordFileMutationEnd(first.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
 
-		const second = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-2', promptText: 'Second change', promptIndex: 2 });
+		const second = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-2', promptText: 'Second change', promptIndex: 1 });
 		await manager.recordFileMutationStart(second.id, { toolCallId: 'call-2', toolName: 'edit', filePath: 'example.ts' });
 		await writeFile(file, 'alpha\nbeta\ngamma\n');
 		await manager.recordFileMutationEnd(second.id, { toolCallId: 'call-2', toolName: 'edit', filePath: 'example.ts' });
@@ -674,7 +720,7 @@ suite('Reversion manager', () => {
 	test('builds no-op reset plans when files already match the target checkpoint', async () => {
 		const file = join(directory, 'example.ts');
 		await writeFile(file, 'before\n');
-		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 0 });
 		await manager.recordFileMutationStart(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
 		await writeFile(file, 'after\n');
 		await manager.recordFileMutationEnd(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
@@ -690,7 +736,7 @@ suite('Reversion manager', () => {
 	test('reports reset conflicts when current files changed outside tracked mutations', async () => {
 		const file = join(directory, 'example.ts');
 		await writeFile(file, 'before\n');
-		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 0 });
 		await manager.recordFileMutationStart(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
 		await writeFile(file, 'after\n');
 		await manager.recordFileMutationEnd(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
@@ -705,12 +751,12 @@ suite('Reversion manager', () => {
 	test('ignores checkpoints from unrelated sessions when building reset plans', async () => {
 		const file = join(directory, 'example.ts');
 		await writeFile(file, 'before\n');
-		const target = await manager.createCheckpoint({ sessionPath: '/tmp/session-a.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		const target = await manager.createCheckpoint({ sessionPath: '/tmp/session-a.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 0 });
 		await manager.recordFileMutationStart(target.id, { toolCallId: 'call-a', toolName: 'edit', filePath: 'example.ts' });
 		await writeFile(file, 'after session a\n');
 		await manager.recordFileMutationEnd(target.id, { toolCallId: 'call-a', toolName: 'edit', filePath: 'example.ts' });
 
-		const unrelated = await manager.createCheckpoint({ sessionPath: '/tmp/session-b.jsonl', promptMessageId: 'user-2', promptText: 'Unrelated change', promptIndex: 2 });
+		const unrelated = await manager.createCheckpoint({ sessionPath: '/tmp/session-b.jsonl', promptMessageId: 'user-2', promptText: 'Unrelated change', promptIndex: 1 });
 		await manager.recordFileMutationStart(unrelated.id, { toolCallId: 'call-b', toolName: 'edit', filePath: 'example.ts' });
 		await writeFile(file, 'after unrelated session\n');
 		await manager.recordFileMutationEnd(unrelated.id, { toolCallId: 'call-b', toolName: 'edit', filePath: 'example.ts' });
@@ -723,7 +769,7 @@ suite('Reversion manager', () => {
 	});
 
 	test('moves unsaved checkpoints to a session path once the path is known', async () => {
-		const checkpoint = await manager.createCheckpoint({ promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		const checkpoint = await manager.createCheckpoint({ promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 0 });
 
 		await manager.updateCheckpointSessionPath(checkpoint.id, '/tmp/session.jsonl');
 
@@ -734,7 +780,7 @@ suite('Reversion manager', () => {
 	test('applies reset plans and records a safety checkpoint', async () => {
 		const file = join(directory, 'example.ts');
 		await writeFile(file, 'before\n');
-		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 0 });
 		await manager.recordFileMutationStart(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
 		await writeFile(file, 'after\nextra\n');
 		await manager.recordFileMutationEnd(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
@@ -754,7 +800,7 @@ suite('Reversion manager', () => {
 	test('revalidates reset plans before applying them', async () => {
 		const file = join(directory, 'example.ts');
 		await writeFile(file, 'before\n');
-		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 1 });
+		const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: 'user-1', promptText: 'Change file', promptIndex: 0 });
 		await manager.recordFileMutationStart(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
 		await writeFile(file, 'after\n');
 		await manager.recordFileMutationEnd(checkpoint.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
@@ -767,14 +813,14 @@ suite('Reversion manager', () => {
 
 	test('prunes old checkpoint metadata and detail files', async () => {
 		let firstCheckpointId = '';
-		for (let index = 1; index <= 101; index++) {
-			const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: `user-${index}`, promptText: `Prompt ${index}`, promptIndex: index });
+		for (let index = 0; index <= 100; index++) {
+			const checkpoint = await manager.createCheckpoint({ sessionPath: '/tmp/session.jsonl', promptMessageId: `user-${index + 1}`, promptText: `Prompt ${index + 1}`, promptIndex: index });
 			firstCheckpointId ||= checkpoint.id;
 		}
 
 		const checkpoints = await manager.listCheckpoints('/tmp/session.jsonl');
 		assert.strictEqual(checkpoints.length, 100);
-		assert.strictEqual(checkpoints[0]?.promptIndex, 2);
+		assert.strictEqual(checkpoints[0]?.promptIndex, 1);
 		assert.strictEqual(await manager.getCheckpoint(firstCheckpointId), undefined);
 	});
 });
