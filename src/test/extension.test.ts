@@ -772,6 +772,55 @@ suite('Reversion manager', () => {
 		assert.strictEqual(plan.affectedFiles[0]?.expectedCurrent?.content, 'alpha\nbeta\ngamma\n');
 	});
 
+	test('excludes reset safety checkpoints from normal prompt reset planning', async () => {
+		const file = join(directory, 'example.ts');
+		const sessionPath = '/tmp/session.jsonl';
+		await writeFile(file, 'base\n');
+		const first = await manager.createCheckpoint({ sessionPath, promptMessageId: 'user-1', promptText: 'First change', promptIndex: 0 });
+		await manager.recordFileMutationStart(first.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'first\n');
+		await manager.recordFileMutationEnd(first.id, { toolCallId: 'call-1', toolName: 'edit', filePath: 'example.ts' });
+		const second = await manager.createCheckpoint({ sessionPath, promptMessageId: 'user-2', promptText: 'Second change', promptIndex: 1 });
+		await manager.recordFileMutationStart(second.id, { toolCallId: 'call-2', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'second\n');
+		await manager.recordFileMutationEnd(second.id, { toolCallId: 'call-2', toolName: 'edit', filePath: 'example.ts' });
+		const safety = await manager.createCheckpoint({ sessionPath, promptText: 'Before reset to prompt 1', promptIndex: 2 });
+		await manager.recordFileMutationStart(safety.id, { toolCallId: 'reset:example.ts', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'base\n');
+		await manager.recordFileMutationEnd(safety.id, { toolCallId: 'reset:example.ts', toolName: 'edit', filePath: 'example.ts' });
+		const third = await manager.createCheckpoint({ sessionPath, promptMessageId: 'user-3', promptText: 'Third change', promptIndex: 2 });
+		await manager.recordFileMutationStart(third.id, { toolCallId: 'call-3', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'third\n');
+		await manager.recordFileMutationEnd(third.id, { toolCallId: 'call-3', toolName: 'edit', filePath: 'example.ts' });
+
+		const plan = await manager.buildResetPlan(first.id);
+		assert.strictEqual(plan.conflicts.length, 0);
+		assert.strictEqual(plan.stats.affectedFileCount, 1);
+		assert.strictEqual(plan.affectedFiles[0]?.target.content, 'base\n');
+		assert.strictEqual(plan.affectedFiles[0]?.expectedCurrent?.content, 'third\n');
+	});
+
+	test('builds reset plans from a single safety checkpoint for undo', async () => {
+		const file = join(directory, 'example.ts');
+		const sessionPath = '/tmp/session.jsonl';
+		await writeFile(file, 'latest\n');
+		const safety = await manager.createCheckpoint({ sessionPath, promptText: 'Before reset to prompt 1', promptIndex: 2 });
+		await manager.recordFileMutationStart(safety.id, { toolCallId: 'reset:example.ts', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'base\n');
+		await manager.recordFileMutationEnd(safety.id, { toolCallId: 'reset:example.ts', toolName: 'edit', filePath: 'example.ts' });
+		const laterSafety = await manager.createCheckpoint({ sessionPath, promptText: 'Before reset to prompt 2', promptIndex: 3 });
+		await manager.recordFileMutationStart(laterSafety.id, { toolCallId: 'reset-2:example.ts', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'other\n');
+		await manager.recordFileMutationEnd(laterSafety.id, { toolCallId: 'reset-2:example.ts', toolName: 'edit', filePath: 'example.ts' });
+		await writeFile(file, 'base\n');
+
+		const plan = await manager.buildResetPlan(safety.id);
+		assert.strictEqual(plan.conflicts.length, 0);
+		assert.strictEqual(plan.stats.affectedFileCount, 1);
+		assert.strictEqual(plan.affectedFiles[0]?.target.content, 'latest\n');
+		assert.strictEqual(plan.affectedFiles[0]?.expectedCurrent?.content, 'base\n');
+	});
+
 	test('builds no-op reset plans when files already match the target checkpoint', async () => {
 		const file = join(directory, 'example.ts');
 		await writeFile(file, 'before\n');
@@ -1086,7 +1135,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(bannerCss, /background: var\(--vscode-editorWidget-background/);
 		assert.match(bannerCss, /pointer-events: auto;/);
 		assert.doesNotMatch(bannerCss, /position: absolute;/);
-		assert.match(panelSource, /this\.post\(\{ type: 'resetRestoreState', checkpointId, message: checkpointId \? 'Code was reset to an earlier point\.' : undefined \}\);/);
+		assert.match(panelSource, /this\.post\(\{ type: 'resetRestoreState', checkpointId, message: checkpointId \? 'Changes reverted\.' : undefined \}\);/);
 		assert.match(panelSource, /this\.postResetRestoreState\(options\.skipConfirmation \? undefined : appliedPlan\.safetyCheckpointId\);/);
 		assert.match(panelSource, /if \(!options\.skipConfirmation\) \{[\s\S]*showResetDialog\(\{ title: 'Reset code to this point\?'/);
 	});

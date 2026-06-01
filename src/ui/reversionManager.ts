@@ -470,8 +470,15 @@ export class ReversionManager {
 	}
 
 	private async getResetCandidateSummaries(targetCheckpoint: ReversionCheckpoint): Promise<ReversionCheckpointSummary[]> {
+		if (isSafetyCheckpointSummary(targetCheckpoint)) {
+			return [toSummary(targetCheckpoint)];
+		}
+
 		const summaryById = new Map<string, ReversionCheckpointSummary>();
 		const add = (summary: ReversionCheckpointSummary) => {
+			if (isSafetyCheckpointSummary(summary)) {
+				return;
+			}
 			if (summary.sessionPath === targetCheckpoint.sessionPath
 				&& summary.workspaceRoot === targetCheckpoint.workspaceRoot
 				&& summary.promptIndex >= targetCheckpoint.promptIndex) {
