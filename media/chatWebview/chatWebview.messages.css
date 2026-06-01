@@ -134,11 +134,13 @@
 	border: 1px solid var(--vscode-button-border, transparent);
 	border-radius: 999px;
 	color: var(--vscode-editorWidget-foreground, var(--vscode-button-foreground));
-	background: var(--vscode-editorWidget-background, var(--vscode-button-secondaryBackground, var(--vscode-button-background)));
+	background:
+		linear-gradient(var(--vscode-button-secondaryBackground, transparent), var(--vscode-button-secondaryBackground, transparent)),
+		var(--vscode-editorWidget-background, var(--vscode-sideBar-background, var(--vscode-button-background)));
 	box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.45));
 	opacity: 0;
 	pointer-events: none;
-	transition: opacity 80ms ease-out, background 80ms ease-out;
+	transition: opacity 80ms ease-out, background 80ms ease-out, color 80ms ease-out;
 }
 .user:hover .reset-checkpoint-button,
 .reset-checkpoint-button:focus-visible {
@@ -146,9 +148,11 @@
 	pointer-events: auto;
 }
 .reset-checkpoint-button:hover {
-	background: var(--vscode-list-activeSelectionBackground, var(--vscode-button-secondaryHoverBackground, var(--vscode-editorWidget-background)));
+	background:
+		linear-gradient(var(--vscode-list-activeSelectionBackground, var(--vscode-button-secondaryHoverBackground, transparent)), var(--vscode-list-activeSelectionBackground, var(--vscode-button-secondaryHoverBackground, transparent))),
+		var(--vscode-editorWidget-background, var(--vscode-sideBar-background, var(--vscode-button-background)));
 	color: var(--vscode-list-activeSelectionForeground, var(--vscode-editorWidget-foreground, var(--vscode-button-foreground)));
-	opacity: 1;
+	opacity: 1 !important;
 }
 .reset-checkpoint-button:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);

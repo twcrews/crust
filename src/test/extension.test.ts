@@ -1004,9 +1004,9 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(mainSource, /addMessage\(message\.id[\s\S]*message\.compaction === true, message\.checkpointId \?\? ""\);/);
 		assert.match(mainSource, /!previousModalFocus\.classList\.contains\("reset-checkpoint-button"\)[\s\S]*previousModalFocus\.focus\(\)/);
 		assert.match(css, /\.reset-checkpoint-button \{[\s\S]*position: absolute;[\s\S]*right: -9px;[\s\S]*bottom: -9px;/);
-		assert.match(css, /\.reset-checkpoint-button \{[\s\S]*background: var\(--vscode-editorWidget-background/);
+		assert.match(css, /\.reset-checkpoint-button \{[\s\S]*linear-gradient\(var\(--vscode-button-secondaryBackground[\s\S]*var\(--vscode-editorWidget-background/);
 		assert.match(css, /\.user:hover \.reset-checkpoint-button,[\s\S]*\.reset-checkpoint-button:focus-visible \{[\s\S]*opacity: 1;/);
-		assert.match(css, /\.reset-checkpoint-button:hover \{[\s\S]*background: var\(--vscode-list-activeSelectionBackground[\s\S]*opacity: 1;/);
+		assert.match(css, /\.reset-checkpoint-button:hover \{[\s\S]*linear-gradient\(var\(--vscode-list-activeSelectionBackground[\s\S]*var\(--vscode-editorWidget-background[\s\S]*opacity: 1 !important;/);
 		assert.doesNotMatch(css, /\.user:focus-within \.reset-checkpoint-button/);
 	});
 
