@@ -1327,7 +1327,7 @@ export class CrustChatPanel implements vscode.Disposable {
 			}
 			const appliedPlan = await this.reversionManager.applyResetPlan(plan);
 			this.post({ type: 'status', message: `Reset ${appliedPlan.stats.affectedFileCount} file${appliedPlan.stats.affectedFileCount === 1 ? '' : 's'}.` });
-			this.postResetRestoreState(appliedPlan.safetyCheckpointId);
+			this.postResetRestoreState(options.skipConfirmation ? undefined : appliedPlan.safetyCheckpointId);
 		} catch (error) {
 			this.log('Reset checkpoint failed', { checkpointId, error: errorMessage(error) }, 'error');
 			await this.showResetDialog({ title: `Unable to reset code: ${errorMessage(error)}`, confirmLabel: 'OK', severity: 'error' });

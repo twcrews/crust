@@ -1087,7 +1087,7 @@ suite('Webview HTML and nonce generation', () => {
 		assert.match(bannerCss, /pointer-events: auto;/);
 		assert.doesNotMatch(bannerCss, /position: absolute;/);
 		assert.match(panelSource, /this\.post\(\{ type: 'resetRestoreState', checkpointId, message: checkpointId \? 'Code was reset to an earlier point\.' : undefined \}\);/);
-		assert.match(panelSource, /this\.postResetRestoreState\(appliedPlan\.safetyCheckpointId\);/);
+		assert.match(panelSource, /this\.postResetRestoreState\(options\.skipConfirmation \? undefined : appliedPlan\.safetyCheckpointId\);/);
 		assert.match(panelSource, /if \(!options\.skipConfirmation\) \{[\s\S]*showResetDialog\(\{ title: 'Reset code to this point\?'/);
 	});
 
