@@ -4,6 +4,14 @@ All notable changes to the Crust extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.11.0] - 2026-06-01
+
+- Added checkpoint-based code reset support with prompt reset buttons, reset confirmation modals, conflict detection, safety checkpoints, and undo banners.
+- Added `/fork` slash command support through the Pi RPC client and webview chat flow.
+- Improved restored-session loading states and automatic view refresh after extension updates.
+- Fixed steering UI behavior and polished reset-related webview controls, checkpoint indexing, and restoration handling.
+- Expanded tests and agent guidance for reversion checkpoints, fork commands, loading states, and refreshed webview/session behavior.
+
 ## [0.10.0] - 2026-05-26
 
 - Added a toggle-able Follow chat control for enabling and pausing automatic scrolling in the chat webview.
@@ -120,6 +128,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+[0.11.0]: https://github.com/twcrews/crust/compare/0.10.0...0.11.0
 [0.10.0]: https://github.com/twcrews/crust/compare/0.9.1...0.10.0
 [0.9.1]: https://github.com/twcrews/crust/compare/0.9.0...0.9.1
 [0.9.0]: https://github.com/twcrews/crust/compare/0.8.1...0.9.0
