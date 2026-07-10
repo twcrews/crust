@@ -201,7 +201,7 @@
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^25.9.1",
+    "@types/node": "^26.1.1",
     "@types/vscode": "1.74.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
